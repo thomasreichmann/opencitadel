@@ -76,6 +76,7 @@ node packages/client/dist/cli.js join <server-id>
 | [docs/PLUGINS.md](docs/PLUGINS.md) | Writing, signing, packaging and publishing plugins |
 | [docs/REGISTRY.md](docs/REGISTRY.md) | Running a registry: signature policy, advisories, takedowns, FastDL for Deadworks |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it fits together; HTTP API, bridge protocol, file formats |
+| [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: tag, then npm trusted publishing with provenance |
 
 ## Repository layout
 

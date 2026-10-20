@@ -1,0 +1,63 @@
+name: Release
+
+# Publishes the @opencitadel packages to npm when a vX.Y.Z tag is pushed
+# (`node scripts/release.mjs X.Y.Z && git push --follow-tags`). It uses npm trusted publishing:
+# no npm token is stored anywhere; npm verifies this workflow's GitHub OIDC token and attaches
+# provenance to every version. See docs/RELEASING.md.
+#
+# Run it by hand (Actions → Release → Run workflow) for a dry run that builds, tests and packs.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: node scripts/e2e.mjs
+      - name: Pack every package (dry run)
+        run: node scripts/publish-packages.mjs --dry-run
+
+  publish:
+    needs: check
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only v* tags may deploy to this environment; npm's trusted publisher entries name it too.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships npm 10.
+      - run: npm install -g npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Publish to npm (trusted publishing, provenance)
+        run: node scripts/publish-packages.mjs
