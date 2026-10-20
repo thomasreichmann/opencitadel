@@ -1,0 +1,47 @@
+{
+  "name": "@opencitadel/client",
+  "version": "0.1.0",
+  "description": "citadel-browser: find, join and sync content for community Deadlock servers",
+  "keywords": [
+    "deadlock",
+    "opencitadel",
+    "server-browser",
+    "cli"
+  ],
+  "homepage": "https://github.com/thomasreichmann/opencitadel#readme",
+  "bugs": {
+    "url": "https://github.com/thomasreichmann/opencitadel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasreichmann/opencitadel.git",
+    "directory": "packages/client"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "citadel-browser": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@opencitadel/gamefiles": "workspace:*",
+    "@opencitadel/master": "workspace:*",
+    "@opencitadel/protocol": "workspace:*"
+  }
+}

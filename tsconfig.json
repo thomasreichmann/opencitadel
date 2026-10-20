@@ -1,0 +1,32 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/gamefiles"
+    },
+    {
+      "path": "packages/plugin-sdk"
+    },
+    {
+      "path": "packages/host"
+    },
+    {
+      "path": "packages/master"
+    },
+    {
+      "path": "packages/client"
+    },
+    {
+      "path": "plugins/welcome"
+    },
+    {
+      "path": "plugins/map-rotation"
+    },
+    {
+      "path": "plugins/discord-webhook"
+    }
+  ]
+}

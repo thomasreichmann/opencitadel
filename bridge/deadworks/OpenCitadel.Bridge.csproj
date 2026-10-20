@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>OpenCitadel.Bridge</RootNamespace>
+    <AssemblyName>OpenCitadel.Bridge</AssemblyName>
+    <Version>0.1.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- Deadlock's managed folder, where Deadworks keeps DeadworksManaged.Api.dll. Override with
+         `dotnet build -p:DeadlockManagedDir=...` if Deadlock lives elsewhere. -->
+    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Deadlock\game\bin\win64\managed</DeadlockManagedDir>
+    <!-- Set to true to copy the built plugin into $(DeadlockManagedDir)\plugins after each build. -->
+    <DeployToGame Condition="'$(DeployToGame)' == ''">false</DeployToGame>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Supplied by Deadworks at runtime, so never copied next to the plugin. -->
+    <Reference Include="DeadworksManaged.Api">
+      <HintPath>$(DeadlockManagedDir)\DeadworksManaged.Api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Google.Protobuf">
+      <HintPath>$(DeadlockManagedDir)\Google.Protobuf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true'">
+    <ItemGroup>
+      <DeployFiles Include="$(OutputPath)OpenCitadel.Bridge.dll;$(OutputPath)OpenCitadel.Bridge.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DeployFiles)" DestinationFolder="$(DeadlockManagedDir)\plugins" SkipUnchangedFiles="false" Retries="0" ContinueOnError="WarnAndContinue" />
+  </Target>
+
+</Project>

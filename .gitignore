@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.data/
+data/
+*.log
+bridge/deadworks/bin/
+bridge/deadworks/obj/
+# local server / client state (server.json holds secrets)
+/server.json
+.opencitadel/

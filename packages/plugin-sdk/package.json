@@ -1,0 +1,40 @@
+{
+  "name": "@opencitadel/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Types and helpers for writing OpenCitadel host plugins",
+  "keywords": [
+    "deadlock",
+    "opencitadel",
+    "plugin",
+    "sdk",
+    "game-server"
+  ],
+  "homepage": "https://github.com/thomasreichmann/opencitadel#readme",
+  "bugs": {
+    "url": "https://github.com/thomasreichmann/opencitadel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasreichmann/opencitadel.git",
+    "directory": "packages/plugin-sdk"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

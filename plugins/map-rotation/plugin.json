@@ -1,0 +1,19 @@
+{
+  "id": "map-rotation",
+  "name": "Map Rotation",
+  "version": "0.1.0",
+  "kind": "host",
+  "description": "Rotates through a map list when the server sits empty or on a schedule, with !nextmap, !rtv votes and an admin !map command.",
+  "author": "OpenCitadel",
+  "license": "MIT",
+  "tags": ["maps", "voting", "admin"],
+  "main": "dist/index.js",
+  "engines": { "opencitadel": "^0.1.0" },
+  "permissions": ["server.command", "server.chat", "listing.write", "storage"],
+  "config": {
+    "maps": { "type": "string[]", "default": ["dl_midtown"], "description": "Maps to rotate through, in order." },
+    "emptyMinutes": { "type": "integer", "default": 20, "description": "Rotate once after the server has been empty this long. 0 turns it off." },
+    "intervalMinutes": { "type": "integer", "default": 0, "description": "Rotate every N minutes while players are on (announced a minute ahead). 0 turns it off." },
+    "rtvRatio": { "type": "number", "default": 0.6, "description": "Share of players who must type !rtv to change the map." }
+  }
+}

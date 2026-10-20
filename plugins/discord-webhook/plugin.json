@@ -1,0 +1,21 @@
+{
+  "id": "discord-webhook",
+  "name": "Discord Webhook",
+  "version": "0.1.0",
+  "kind": "host",
+  "description": "Posts server up/down, player joins and leaves, map changes and optionally chat to a Discord channel through a webhook.",
+  "author": "OpenCitadel",
+  "license": "MIT",
+  "tags": ["discord", "notifications"],
+  "main": "dist/index.js",
+  "engines": { "opencitadel": "^0.1.0" },
+  "permissions": ["network"],
+  "config": {
+    "webhookUrl": { "type": "string", "default": "", "secret": true, "description": "Discord webhook URL (Channel settings → Integrations → Webhooks)." },
+    "events": { "type": "string[]", "default": ["server", "players", "maps"], "description": "What to post: server, players, maps." },
+    "relayChat": { "type": "boolean", "default": false, "description": "Also relay public chat messages." },
+    "username": { "type": "string", "default": "", "description": "Name the webhook posts as. Defaults to the server name." },
+    "batchSeconds": { "type": "integer", "default": 5, "description": "Collect messages for this long and post them together." },
+    "maxPerMinute": { "type": "integer", "default": 20, "description": "Never post more often than this." }
+  }
+}

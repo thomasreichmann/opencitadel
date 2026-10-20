@@ -1,0 +1,51 @@
+{
+  "name": "@opencitadel/host",
+  "version": "0.1.0",
+  "description": "citadel-host: runs and supervises a Deadlock dedicated server, lists it, and loads plugins",
+  "keywords": [
+    "deadlock",
+    "opencitadel",
+    "dedicated-server",
+    "rcon",
+    "plugins",
+    "sandbox"
+  ],
+  "homepage": "https://github.com/thomasreichmann/opencitadel#readme",
+  "bugs": {
+    "url": "https://github.com/thomasreichmann/opencitadel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasreichmann/opencitadel.git",
+    "directory": "packages/host"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "citadel-host": "dist/cli.js",
+    "citadel-pkg": "dist/pkg-cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@opencitadel/gamefiles": "workspace:*",
+    "@opencitadel/plugin-sdk": "workspace:*",
+    "@opencitadel/protocol": "workspace:*",
+    "quickjs-emscripten": "0.32.0"
+  }
+}

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Find and join community Deadlock servers, and browse server plugins.">
+  <title>OpenCitadel · Community Servers</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="#/" aria-label="OpenCitadel home">
+        <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="3">
+            <path d="M32 6 L54 19 V45 L32 58 L10 45 V19 Z"/>
+            <path d="M32 17 V47 M21 24 L32 17 L43 24 M21 40 L32 47 L43 40" stroke-width="2.5"/>
+          </g>
+          <circle cx="32" cy="32" r="5" fill="currentColor"/>
+        </svg>
+        <span class="brand-text">
+          <span class="brand-name">OpenCitadel</span>
+          <span class="brand-sub">Community servers for Deadlock</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="#/" data-nav="servers">Servers</a>
+        <a href="#/plugins" data-nav="plugins">Plugins</a>
+        <a href="#/host" data-nav="host">Host a server</a>
+      </nav>
+      <p class="tally" id="tally" aria-live="polite"></p>
+    </div>
+    <div class="deco-rule" aria-hidden="true"><span></span></div>
+  </header>
+
+  <div class="banner" id="local-banner" hidden>
+    <span class="banner-dot" aria-hidden="true"></span>
+    <span>Running in <strong>citadel-browser</strong>: joining installs required content and launches Deadlock for you.</span>
+  </div>
+
+  <main id="main" tabindex="-1">
+    <div id="view" class="view"></div>
+  </main>
+
+  <footer class="colophon">
+    <p>OpenCitadel is an open, self-hostable community project. Not affiliated with or endorsed by Valve.</p>
+    <p><a href="/v1/servers">JSON API</a> · <a href="#/host">Run your own master or server</a></p>
+    <p id="abuse-contact" hidden></p>
+  </footer>
+
+  <div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
+
+  <dialog class="modal" id="join-dialog" aria-labelledby="join-title">
+    <form method="dialog" class="modal-body">
+      <h2 id="join-title" class="modal-title">Joining</h2>
+      <div id="join-content"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" value="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="tpl-host">
+    <article class="guide">
+      <header class="page-head">
+        <p class="eyebrow">Server owners</p>
+        <h1 class="page-title">Host a server</h1>
+        <p class="lede">Run a Deadlock dedicated server with <code>citadel-host</code>, list it here, and extend it with plugins. You need Deadlock installed through Steam and Node.js 22 or newer.</p>
+      </header>
+
+      <ol class="steps">
+        <li>
+          <h2>Create a server directory</h2>
+          <p><code>init</code> writes <code>server.json</code>, finds your Deadlock install and generates an RCON password.</p>
+          <pre class="cmd"><code>mkdir my-server &amp;&amp; cd my-server
+citadel-host init</code></pre>
+        </li>
+        <li>
+          <h2>Get an account key and register the server</h2>
+          <p>Create an account on this master once (keep the key safe), then register the server with it. The server token is stored in <code>server.json</code>.</p>
+          <pre class="cmd"><code>curl -X POST <span data-origin></span>/v1/accounts \
+  -H 'content-type: application/json' -d '{"name":"your-name"}'
+citadel-host register --master <span data-origin></span> --api-key ock_…</code></pre>
+        </li>
+        <li>
+          <h2>Start it</h2>
+          <p>The host patches <code>gameinfo.gi</code> for Steam P2P connections (re-applied after every game update), launches <code>deadlock.exe -dedicated</code>, restarts it if it crashes, and sends a heartbeat here every 30 seconds.</p>
+          <pre class="cmd"><code>citadel-host start</code></pre>
+          <p>Players join over Steam Datagram Relay with the server's SteamID, so no port forwarding is needed. To also advertise a direct address (and earn the <em>verified</em> badge), forward UDP and TCP 27015 and set <code>"publicAddress": "your.ip:27015"</code>.</p>
+        </li>
+        <li>
+          <h2>Add plugins</h2>
+          <p>Browse the <a href="#/plugins">plugin directory</a>. Installing shows the permissions a plugin asks for before anything runs.</p>
+          <pre class="cmd"><code>citadel-host plugin install welcome</code></pre>
+        </li>
+      </ol>
+
+      <section class="aside-card">
+        <h2>Already running Deadworks?</h2>
+        <p>This master speaks the Deadworks server-browser protocol. Point your server at it in <code>game/bin/win64/configs/deadworks.jsonc</code>:</p>
+        <pre class="cmd"><code>"serverbrowser": { "api_url": "<span data-origin></span>" }</code></pre>
+        <p>Or run it under <code>citadel-host</code> with <code>"game": { "executable": "deadworks" }</code> to get host plugins too.</p>
+      </section>
+
+      <section class="aside-card">
+        <h2>Run your own master</h2>
+        <p>This whole directory is one process with a SQLite file. Anyone can run one:</p>
+        <pre class="cmd"><code>citadel-master serve --port 8080 --data ./data</code></pre>
+      </section>
+    </article>
+  </template>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

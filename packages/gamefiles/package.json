@@ -1,0 +1,40 @@
+{
+  "name": "@opencitadel/gamefiles",
+  "version": "0.1.0",
+  "description": "Deadlock install discovery, gameinfo.gi editing and launch helpers",
+  "keywords": [
+    "deadlock",
+    "opencitadel",
+    "gameinfo",
+    "keyvalues",
+    "source2"
+  ],
+  "homepage": "https://github.com/thomasreichmann/opencitadel#readme",
+  "bugs": {
+    "url": "https://github.com/thomasreichmann/opencitadel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasreichmann/opencitadel.git",
+    "directory": "packages/gamefiles"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

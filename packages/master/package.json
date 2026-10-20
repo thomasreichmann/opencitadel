@@ -1,0 +1,48 @@
+{
+  "name": "@opencitadel/master",
+  "version": "0.1.0",
+  "description": "citadel-master: open server list, web server browser and plugin registry for Deadlock",
+  "keywords": [
+    "deadlock",
+    "opencitadel",
+    "master-server",
+    "server-browser",
+    "plugin-registry"
+  ],
+  "homepage": "https://github.com/thomasreichmann/opencitadel#readme",
+  "bugs": {
+    "url": "https://github.com/thomasreichmann/opencitadel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thomasreichmann/opencitadel.git",
+    "directory": "packages/master"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "citadel-master": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./web/*": "./web/*"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo",
+    "web"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@opencitadel/protocol": "workspace:*"
+  }
+}

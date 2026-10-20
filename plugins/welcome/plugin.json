@@ -1,0 +1,19 @@
+{
+  "id": "welcome",
+  "name": "Welcome Messages",
+  "version": "0.1.0",
+  "kind": "host",
+  "description": "Greets players when they join and answers !rules and !discord.",
+  "author": "OpenCitadel",
+  "license": "MIT",
+  "tags": ["chat", "utility"],
+  "main": "dist/index.js",
+  "engines": { "opencitadel": "^0.1.0" },
+  "permissions": ["server.chat"],
+  "config": {
+    "message": { "type": "string", "default": "Welcome to {server}, {name}! Type !help for commands.", "description": "Greeting sent to each player. {name} and {server} are replaced." },
+    "delaySeconds": { "type": "integer", "default": 15, "description": "Wait this long after a player connects, so they have loaded in." },
+    "rules": { "type": "string[]", "default": [], "description": "Lines shown by !rules." },
+    "discord": { "type": "string", "default": "", "description": "Invite link shown by !discord." }
+  }
+}
