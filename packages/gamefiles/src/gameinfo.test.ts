@@ -106,5 +106,6 @@ test('real gameinfo.gi parses and round-trips', { skip: !install && 'no Deadlock
   const status = inspectGameinfo(both);
   assert.equal(status.dedicatedReady, true);
   assert.equal(status.contentMounted, true);
-  assert.equal(removeOurEdits(both), src);
+  // The file on disk may already carry our edits (a host is running); compare with them removed.
+  assert.equal(removeOurEdits(both), removeOurEdits(src));
 });

@@ -98,7 +98,9 @@ test('host services: chat sanitising, admins, channel selection', async () => {
   await services.tell({ name: 'Bob' }, 'psst');
   await services.kick({ name: 'Bob', slot: 4 }, 'afk');
   await services.kick({ name: 'Eve"' });
-  assert.deepEqual(sent, ['say "hello  quit"', 'say "Bob: psst"', 'kickid 4 "afk"', 'kick "Eve"']);
+  // `say` goes unquoted (Deadlock shows quotes verbatim), with `;` stripped and `//` defused.
+  await services.say('see https://discord.gg/x "now"');
+  assert.deepEqual(sent, ['say hello  quit', 'say Bob: psst', 'kickid 4 "afk"', 'kick "Eve"', 'say see https:/​/discord.gg/x  now']);
 
   state.phase = 'stopped' as never;
   await assert.rejects(services.command('status'), /not running/);

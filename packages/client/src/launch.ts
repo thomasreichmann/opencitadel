@@ -88,13 +88,20 @@ export function systemPlatform(): Platform {
       return pipeTo('xsel', ['--clipboard', '--input'], text);
     },
 
+    // A dedicated server is deadlock.exe too (hosting and playing on one machine is common), so
+    // only processes without `-dedicated` on their command line count as the game.
     async isGameRunning() {
       if (windowsLike) {
-        const { stdout } = await run('tasklist.exe', ['/FI', 'IMAGENAME eq deadlock.exe', '/NH']);
-        return /deadlock\.exe/i.test(stdout);
+        const script =
+          "@(Get-CimInstance Win32_Process -Filter \"Name='deadlock.exe'\" | Where-Object { $_.CommandLine -notlike '*-dedicated*' }).Count";
+        const { stdout, code } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script]);
+        if (code === 0 && /^\s*\d+\s*$/.test(stdout)) return Number(stdout.trim()) > 0;
+        const fallback = await run('tasklist.exe', ['/FI', 'IMAGENAME eq deadlock.exe', '/NH']);
+        return /deadlock\.exe/i.test(fallback.stdout);
       }
       // Linux (Proton) and macOS: the Windows binary shows up in the process list by name.
-      return (await run('pgrep', ['-f', 'deadlock.exe'])).code === 0;
+      const { stdout } = await run('pgrep', ['-af', 'deadlock.exe']);
+      return stdout.split('\n').some((line) => /deadlock\.exe/i.test(line) && !/\s-dedicated\b/.test(line));
     },
   };
 }

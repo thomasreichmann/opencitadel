@@ -4,22 +4,33 @@ import { createServer, type Server, type Socket } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { RconClient, decodePackets, encodePacket } from './rcon.js';
 
-/** A fake Source RCON server. `mirrorSentinel: false` imitates servers that ignore the empty packet. */
-function fakeServer(opts: { password: string; mirrorSentinel: boolean; respond: (cmd: string) => string[] }): Promise<Server> {
+/**
+ * A fake Source RCON server. `mirrorSentinel: false` imitates servers that ignore empty packets.
+ * `deferMs` imitates Deadlock: it runs commands on a later tick and stamps the output with the id
+ * of the most recent packet it received (observed on build 6796).
+ */
+function fakeServer(opts: { password: string; mirrorSentinel: boolean; deferMs?: number; respond: (cmd: string) => string[] }): Promise<Server> {
   const server = createServer((sock: Socket) => {
     let buf: Buffer = Buffer.alloc(0);
     let authed = false;
+    let lastId = 0;
     sock.on('data', (chunk) => {
       buf = Buffer.concat([buf, chunk]);
       const { packets, rest } = decodePackets(buf);
       buf = rest;
       for (const p of packets) {
+        lastId = p.id;
         if (p.type === 3) {
           authed = p.body === opts.password;
           sock.write(encodePacket(p.id, 0, ''));
           sock.write(encodePacket(authed ? p.id : -1, 2, ''));
         } else if (p.type === 2 && authed) {
-          for (const part of opts.respond(p.body)) sock.write(encodePacket(p.id, 0, part));
+          const reply = () => {
+            const id = opts.deferMs ? lastId : p.id;
+            for (const part of opts.respond(p.body)) sock.write(encodePacket(id, 0, part));
+          };
+          if (opts.deferMs) setTimeout(reply, opts.deferMs);
+          else reply();
         } else if (p.type === 0 && authed && opts.mirrorSentinel) {
           sock.write(encodePacket(p.id, 0, ''));
         }
@@ -29,14 +40,19 @@ function fakeServer(opts: { password: string; mirrorSentinel: boolean; respond: 
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-for (const mirrorSentinel of [true, false]) {
-  test(`rcon commands (sentinel mirrored: ${mirrorSentinel})`, async () => {
+for (const [label, mirrorSentinel, deferMs] of [
+  ['Source 1: reply, then sentinel echo', true, 0],
+  ['no sentinel echo', false, 0],
+  ['Deadlock: sentinel echo first, reply a tick later', true, 40],
+] as const) {
+  test(`rcon commands (${label})`, async () => {
     const server = await fakeServer({
       password: 'secret',
       mirrorSentinel,
+      deferMs,
       respond: (cmd) => (cmd === 'status' ? ['hostname: test\n', 'map     : dl_midtown\n'] : cmd === 'big' ? ['x'.repeat(5000)] : []),
     });
-    const client = new RconClient({ host: '127.0.0.1', port: (server.address() as AddressInfo).port, password: 'secret', quietMs: 50 });
+    const client = new RconClient({ host: '127.0.0.1', port: (server.address() as AddressInfo).port, password: 'secret', quietMs: 50, replyWaitMs: 300 });
     try {
       await client.connect();
       const [a, b, c] = await Promise.all([client.command('status'), client.command('sv_cheats 0'), client.command('big')]);

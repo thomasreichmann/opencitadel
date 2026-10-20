@@ -80,7 +80,7 @@ const until = async (what: string, cond: () => boolean, ms = 30_000) => {
 
 const TIMINGS = { rconRetryMs: 100, statusPollMs: 150, heartbeatMs: 100, stopTimeoutMs: 3000, backoffBaseMs: 150, tickMs: 100, stateWriteMs: 50, logPollMs: 25 };
 
-async function setup(wrapperExtra: string[] = []) {
+async function setup(wrapperExtra: string[] = [], overrides: Record<string, unknown> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'oc-game-'));
   const serverDir = await mkdtemp(join(tmpdir(), 'oc-server-'));
   const layout = await createFakeInstall(root);
@@ -92,6 +92,7 @@ async function setup(wrapperExtra: string[] = []) {
     master: { url: master.url, serverId: 'srv1', token: 'ocs_t' },
     bridge: { enabled: true, port: await freePort() },
     privacy: { showPlayerNames: true },
+    ...overrides,
   });
   const host = new RecordingHost();
   const sup = new Supervisor({ serverDir, config, gameRoot: root, createPluginHost: () => host, timings: TIMINGS });
@@ -150,8 +151,9 @@ test('supervisor runs, lists, survives a crash, and stops cleanly', async () => 
     assert.equal(stateFile?.phase, 'running');
     assert.equal(stateFile?.pid, process.pid);
 
-    // Crash → restart with a new anonymous SteamID, republished in the listing.
-    await sup.services.command('_crash');
+    // Crash → restart with a new anonymous SteamID, republished in the listing. A command that
+    // kills the server can't answer, so the RCON connection simply drops under it.
+    await sup.services.command('_crash').catch((err: Error) => assert.match(err.message, /RCON connection closed/));
     await until('crash reported', () => host.of('server.stopped').some((e) => e.crashed));
     await until('relaunch', () => host.of('server.starting').length === 2);
     await until('new steamId listed', () => heartbeats(master.hits).some((b) => (b.connect as { steamId?: string }).steamId && (b.connect as { steamId: string }).steamId !== firstSteamId));
@@ -165,6 +167,38 @@ test('supervisor runs, lists, survives a crash, and stops cleanly', async () => 
     assert.equal((await readStateFile(hostPaths(serverDir).stateFile))?.phase, 'stopped');
   } finally {
     delete process.env.FAKE_PLAYERS;
+    await cleanup();
+  }
+});
+
+test('a finished match gets a fresh server, on the map a plugin picked', async () => {
+  const { host, sup, cleanup } = await setup([], { bridge: { enabled: false }, restart: { afterMatchDelaySeconds: 1 } });
+  try {
+    await sup.start();
+    await until('running over RCON', () => sup.getState().sources.rcon && sup.getState().map === 'dl_midtown');
+    await sup.services.command('_endmatch');
+    await until('match.ended', () => host.of('match.ended').length === 1);
+    assert.deepEqual(host.of('match.ended')[0], { map: 'dl_midtown' });
+    // Inside the post-game window a map change only picks the next map; the restart comes once.
+    await sup.changeMap('dl_streets');
+    assert.equal(host.of('server.starting').length, 1);
+    await until('relaunch on the picked map', () => host.of('map.changed').some((e) => e.map === 'dl_streets'));
+    assert.equal(host.of('server.starting').length, 2);
+    assert.deepEqual(host.of('server.stopped'), [{ code: 0, crashed: false }]);
+
+    // Outside it, a map change is a restart on the new map (never `changelevel`, which kills a
+    // stock server), and later crash restarts keep that map.
+    await until('running again', () => sup.getState().sources.rcon);
+    await sup.changeMap('dl_hideout');
+    await until('on dl_hideout', () => sup.getState().map === 'dl_hideout' && sup.getState().sources.rcon);
+    assert.equal(host.of('server.stopped').filter((e) => e.crashed).length, 0);
+    await sup.services.command('_crash').catch(() => {});
+    await until('crash restart', () => host.of('server.starting').length === 4);
+    await until('back on dl_hideout', () => host.of('map.changed').filter((e) => e.map === 'dl_hideout').length === 2);
+
+    assert.ok(host.of('console.line').length > 0);
+    assert.ok(!host.of('console.line').some((e) => e.line.includes('GetNumberOfConsoleInputEvents')), 'per-frame stdin noise is dropped');
+  } finally {
     await cleanup();
   }
 });

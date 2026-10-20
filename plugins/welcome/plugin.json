@@ -13,6 +13,7 @@
   "config": {
     "message": { "type": "string", "default": "Welcome to {server}, {name}! Type !help for commands.", "description": "Greeting sent to each player. {name} and {server} are replaced." },
     "delaySeconds": { "type": "integer", "default": 15, "description": "Wait this long after a player connects, so they have loaded in." },
+    "regreetMinutes": { "type": "integer", "default": 30, "description": "Don't greet a player again who rejoins within this many minutes. 0 greets every join." },
     "rules": { "type": "string[]", "default": [], "description": "Lines shown by !rules." },
     "discord": { "type": "string", "default": "", "description": "Invite link shown by !discord." }
   }

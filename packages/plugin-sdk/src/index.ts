@@ -78,6 +78,11 @@ export interface PluginEvents {
   /** The game process exited. `crashed` is false for an orderly stop. */
   'server.stopped': { code: number | null; crashed: boolean };
   'map.changed': { map: string; previous?: string };
+  /**
+   * A team won and the post-game screen is up. Unless `restart.afterMatch` is off, the host then
+   * starts a fresh server; a `changeMap()` from this handler picks the map it starts on.
+   */
+  'match.ended': { map: string };
   'player.connected': { player: Player };
   'player.disconnected': { player: Player; reason?: string };
   /** Requires the in-game bridge or a server that logs chat. */
@@ -114,7 +119,11 @@ export interface ServerApi {
   tell(player: Player, message: string): Promise<void>;
   /** Kicks a player. Needs `players.manage`. */
   kick(player: Player, reason?: string): Promise<void>;
-  /** Changes level. Needs `server.command`. */
+  /**
+   * Moves the server to `map`. Needs `server.command`. By default this restarts the server on
+   * that map (players are disconnected, and an anonymous server gets a new SteamID); see
+   * `game.mapChange`. After `match.ended` it only picks the map for the coming restart.
+   */
   changeMap(map: string): Promise<void>;
   /** Looks a player up by slot, SteamID, or case-insensitive name prefix. */
   findPlayer(query: string): Player | undefined;

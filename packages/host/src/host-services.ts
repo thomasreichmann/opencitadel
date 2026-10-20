@@ -12,9 +12,18 @@ import type { RconClient } from './rcon.js';
 import { createLogger } from './logger.js';
 import { playerSteamId } from './parsers.js';
 
-/** Strips what would let chat text break out of `say "…"` and run another command. */
+/** Strips what would let chat text end the `say` command and start another (quotes, `;`, newlines). */
 export function sanitizeChat(text: string): string {
   return text.replace(/[";\r\n\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 240);
+}
+
+/**
+ * Text for an unquoted `say`. Deadlock prints quotes verbatim, so `say "hi"` shows `"hi"` in chat,
+ * and an unquoted `//` starts a console comment, cutting URLs short (observed on build 6796).
+ * A zero-width space between the slashes keeps the whole message and renders invisibly.
+ */
+export function chatCommandText(text: string): string {
+  return sanitizeChat(text).replace(/\/\//g, '/​/');
 }
 
 /** Normalises any SteamID spelling to SteamID64 for comparisons. */
@@ -32,6 +41,8 @@ export interface HostServicesDeps {
   state: () => ServerState;
   bridge: () => BridgeServer | undefined;
   rcon: () => RconClient | undefined;
+  /** The supervisor's map change; without one, a plain `changelevel`. */
+  changeMap?: (map: string) => Promise<void>;
 }
 
 export class HostServicesImpl implements HostServices {
@@ -64,14 +75,14 @@ export class HostServicesImpl implements HostServices {
   }
 
   async say(message: string): Promise<void> {
-    const text = sanitizeChat(message);
+    const text = chatCommandText(message);
     if (!text) return;
     const bridge = this.bridgeUp();
     if (bridge) {
       await bridge.request('say', { message: message.slice(0, 240) });
       return;
     }
-    await this.command(`say "${text}"`);
+    await this.command(`say ${text}`);
   }
 
   async tell(player: Player, message: string): Promise<void> {
@@ -92,6 +103,11 @@ export class HostServicesImpl implements HostServices {
     const why = reason ? ` "${sanitizeChat(reason)}"` : '';
     if (player.slot !== undefined) await this.command(`kickid ${player.slot}${why}`);
     else await this.command(`kick "${sanitizeChat(player.name)}"`);
+  }
+
+  async changeMap(map: string): Promise<void> {
+    if (this.deps.changeMap) return this.deps.changeMap(map);
+    await this.command(`changelevel ${map}`);
   }
 
   isAdmin(player: Player | undefined): boolean {

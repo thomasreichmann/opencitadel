@@ -5,6 +5,7 @@ export interface RotationConfig {
   emptyMinutes: number;
   intervalMinutes: number;
   rtvRatio: number;
+  afterMatch: boolean;
 }
 
 const MAP_NAME = /^[A-Za-z0-9_]+$/;
@@ -84,6 +85,12 @@ export default definePlugin<RotationConfig>({
       lastChange = now;
       announced = false;
       publishNext();
+    });
+
+    // The host starts a fresh server after a match; this picks the map it starts on.
+    ctx.on('match.ended', async () => {
+      const next = upcoming();
+      if (ctx.config.afterMatch && next) await changeTo(next, 'match over');
     });
 
     ctx.on('player.disconnected', ({ player }) => {

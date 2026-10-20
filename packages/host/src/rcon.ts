@@ -1,10 +1,15 @@
 /**
  * Source RCON client (https://developer.valvesoftware.com/wiki/Source_RCON_Protocol).
  *
- * Deadlock's engine2.dll carries the standard `-usercon` / `rcon_password` pair, so a server
- * launched with both answers RCON on its game port over TCP. Commands are serialised; a
- * response ends either when the server mirrors our empty sentinel packet (Source 1 behaviour)
- * or after a short quiet period (some Source 2 servers never mirror it).
+ * A Deadlock server launched with `-usercon` and an `rcon_password` answers RCON on its game port
+ * over TCP. Commands are serialised.
+ *
+ * Classic clients follow each command with an empty "sentinel" packet and stop when it is echoed.
+ * That breaks on Deadlock (observed on build 6796). The server runs commands on a later tick and
+ * stamps their output with the id of the most recent packet it received, so behind a sentinel the
+ * output arrives under the sentinel's id. This client sends no sentinel. A reply is the response
+ * packets for the command's id, and it ends after `quietMs` without a new packet, or after
+ * `replyWaitMs` if the command printed nothing.
  */
 
 import { Socket, connect } from 'node:net';
@@ -25,6 +30,8 @@ export interface RconOptions {
   commandTimeoutMs?: number;
   /** How long to wait after the last response packet before treating a response as complete. */
   quietMs?: number;
+  /** How long to wait for the first response packet before treating the reply as empty. */
+  replyWaitMs?: number;
 }
 
 export function encodePacket(id: number, type: number, body: string): Buffer {
@@ -64,7 +71,6 @@ export function decodePackets(buf: Buffer): { packets: RconPacket[]; rest: Buffe
 
 interface Pending {
   id: number;
-  sentinel: number;
   chunks: string[];
   resolve(out: string): void;
   reject(err: Error): void;
@@ -156,13 +162,11 @@ export class RconClient extends EventEmitter {
           return this.drain();
         }
         const id = this.allocId();
-        const sentinel = this.allocId();
         const timeout = setTimeout(() => this.finish(new Error(`RCON command timed out: ${command}`)), this.opts.commandTimeoutMs ?? 10000);
-        this.pending = { id, sentinel, chunks: [], resolve, reject, timeout };
+        this.pending = { id, chunks: [], resolve, reject, timeout };
         this.socket!.write(encodePacket(id, SERVERDATA_EXECCOMMAND, command));
-        this.socket!.write(encodePacket(sentinel, SERVERDATA_RESPONSE_VALUE, ''));
         // Commands with no output at all still need to complete.
-        this.armQuietTimer();
+        this.armQuietTimer(this.opts.replyWaitMs ?? 1500);
       };
       this.queue.push(run);
       if (!this.pending && this.queue.length === 1) this.drain();
@@ -194,19 +198,18 @@ export class RconClient extends EventEmitter {
     const p = this.pending;
     if (!p) return;
     for (const packet of packets) {
-      if (packet.id === p.sentinel) return this.finish();
       if (packet.id === p.id && packet.type === SERVERDATA_RESPONSE_VALUE) {
         p.chunks.push(packet.body);
-        this.armQuietTimer();
+        this.armQuietTimer(this.opts.quietMs ?? 250);
       }
     }
   }
 
-  private armQuietTimer(): void {
+  private armQuietTimer(ms: number): void {
     const p = this.pending;
     if (!p) return;
     if (p.quiet) clearTimeout(p.quiet);
-    p.quiet = setTimeout(() => this.finish(), this.opts.quietMs ?? 250);
+    p.quiet = setTimeout(() => this.finish(), ms);
   }
 
   private finish(err?: Error): void {

@@ -55,6 +55,12 @@ export function buildServerArgs(config: HostConfig): string[] {
   if (config.rcon.enabled && config.rcon.password) args.push('-usercon');
   if (g.logSource === 'condebug') args.push('-condebug');
   if (g.maxPlayers !== 12) args.push('-maxplayers', String(g.maxPlayers));
+  // Source binds RCON's TCP listener to a single local address of its choosing (on a machine
+  // with a VirtualBox or Hyper-V adapter, often that adapter), where the host can't reliably
+  // reach it. `ip 127.0.0.1` pins RCON to loopback, which also keeps it off the network; the
+  // game's UDP socket stays on all interfaces, so direct and SDR connections are unaffected
+  // (verified on build 6796). Admins who want remote RCON can pass their own -ip/+ip.
+  if (!g.extraArgs.some((a) => a === '-ip' || a === '+ip')) args.push('+ip', '127.0.0.1');
   args.push(
     '+tv_citadel_auto_record', '0',
     '+spec_replay_enable', '0',

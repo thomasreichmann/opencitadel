@@ -22,13 +22,14 @@ import { EventBus, type EventSource } from './eventbus.js';
 import { ensureGameinfo } from './game.js';
 import { Heartbeater } from './heartbeat.js';
 import { HostServicesImpl } from './host-services.js';
-import { planLaunch } from './launch.js';
+import { CFG_NAME, planLaunch } from './launch.js';
 import { createLogger } from './logger.js';
 import { LogTail } from './logtail.js';
-import { parseLogLine, parseStatus, type StatusPlayer } from './parsers.js';
+import { isConsoleNoise, parseLogLine, parseStatus, type StatusPlayer } from './parsers.js';
 import { RconClient } from './rcon.js';
 import { StateWriter, initialState, type StateFile } from './state.js';
 import { HOST_VERSION } from './version.js';
+import { runsOnWindowsSide, stopWindowsProcesses } from './winproc.js';
 
 export interface SupervisorTimings {
   /** Delay before the first RCON attempt after launch, and between retries. */
@@ -117,6 +118,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   private state: ServerState;
   private child?: ChildProcess;
   private childExited?: Promise<void>;
+  /** The game is a Windows process started from WSL, so killing `child` alone won't stop it. */
+  private windowsSide = false;
   private rcon?: RconClient;
   private rconAuthFailed = false;
   private bridge?: BridgeServer;
@@ -133,6 +136,9 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   private stopPromise?: Promise<void>;
   private restartRequested = false;
   private restartTimer?: NodeJS.Timeout;
+  /** Set by changeMap(): the map every later launch starts on, crash restarts included. */
+  private launchMap?: string;
+  private matchEndTimer?: NodeJS.Timeout;
   private rconTimer?: NodeJS.Timeout;
   private statusTimer?: NodeJS.Timeout;
   private tickTimer?: NodeJS.Timeout;
@@ -151,6 +157,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       state: () => this.getState(),
       bridge: () => this.bridge,
       rcon: () => this.rcon,
+      changeMap: (map) => this.changeMap(map),
     });
     this.stateWriter = new StateWriter(hostPaths(opts.serverDir).stateFile, () => this.snapshot(), this.timings.stateWriteMs);
     this.bus.on((event, payload, source) => this.onBusEvent(event, payload, source));
@@ -246,7 +253,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     this.steamIdFromRcon = false;
     this.stateWriter.markDirty();
     this.emit('phase', 'starting');
-    this.log.info(`Starting the server (attempt ${this.attempt}) on map ${this.config.game.map}, port ${this.config.game.port}.`);
+    const map = this.launchMap ?? this.config.game.map;
+    this.log.info(`Starting the server (attempt ${this.attempt}) on map ${map}, port ${this.config.game.port}.`);
     this.toPlugins('server.starting', { attempt: this.attempt });
 
     if (this.config.game.patchGameinfo) {
@@ -259,9 +267,16 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
 
     const token = randomBytes(24).toString('base64url');
     this.bridge?.setToken(token);
-    const plan = planLaunch(this.config, this.layout, this.bridge ? { port: this.bridge.port, token } : undefined);
+    const plan = planLaunch({ ...this.config, game: { ...this.config.game, map } }, this.layout, this.bridge ? { port: this.bridge.port, token } : undefined);
     await mkdir(dirname(plan.cfgPath), { recursive: true });
     await writeFile(plan.cfgPath, plan.cfgContents, { mode: 0o600 });
+
+    this.windowsSide = runsOnWindowsSide(plan.command);
+    if (this.windowsSide) {
+      // A previous host that died without stopping its game leaves it holding the port.
+      const stale = await stopWindowsProcesses(this.processMarkers());
+      if (stale.length) this.log.warn(`Stopped a leftover game process from an earlier run (PID ${stale.join(', ')}).`);
+    }
 
     const condebug = this.config.game.logSource === 'condebug';
     const offset = condebug ? await LogTail.sizeOf(this.layout.consoleLog) : 0;
@@ -288,7 +303,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     this.launchedAt = Date.now();
 
     const onOutput = (line: string) => {
-      if (seq !== this.launchSeq) return;
+      if (seq !== this.launchSeq || isConsoleNoise(line)) return;
       if (condebug) this.log.debug(`[game] ${line}`);
       else this.handleLine(line);
     };
@@ -326,7 +341,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   private teardownLaunch(): void {
     if (this.rconTimer) clearTimeout(this.rconTimer);
     if (this.statusTimer) clearInterval(this.statusTimer);
-    this.rconTimer = this.statusTimer = undefined;
+    if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
+    this.rconTimer = this.statusTimer = this.matchEndTimer = undefined;
     const rcon = this.rcon;
     this.rcon = undefined;
     rcon?.close();
@@ -385,6 +401,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   private async doStop(): Promise<void> {
     this.stopping = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
+    if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
     if (this.tickTimer) clearInterval(this.tickTimer);
     for (const t of this.dailyTimers) clearTimeout(t);
     this.dailyTimers = [];
@@ -410,16 +427,30 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     try {
       if (this.rcon?.connected) await Promise.race([this.rcon.command('quit'), new Promise((r) => setTimeout(r, 2000).unref())]);
       else if (this.bridge?.connected) await this.bridge.request('command', { command: 'quit' }, 2000);
-      else this.child?.kill('SIGTERM');
+      else await this.killGame('SIGTERM');
     } catch {
       // The server often drops the connection before answering `quit`.
     }
     if (await within(this.timings.stopTimeoutMs)) return;
     this.log.warn('The server did not quit in time; terminating it.');
-    this.child?.kill('SIGTERM');
+    await this.killGame('SIGTERM');
     if (await within(3000)) return;
-    this.child?.kill('SIGKILL');
+    await this.killGame('SIGKILL');
     await within(3000);
+  }
+
+  /** Command-line markers that identify this server's game process among other Deadlock processes. */
+  private processMarkers(): string[] {
+    return [`+exec ${CFG_NAME}`, `+hostport ${this.config.game.port}`];
+  }
+
+  /** Kills the game process, including its Windows-side process when it was started from WSL. */
+  private async killGame(signal: NodeJS.Signals): Promise<void> {
+    if (this.windowsSide) {
+      const stopped = await stopWindowsProcesses(this.processMarkers());
+      if (stopped.length) this.log.info(`Stopped deadlock.exe (Windows PID ${stopped.join(', ')}).`);
+    }
+    this.child?.kill(signal);
   }
 
   /** Restarts the game process without counting it as a crash. */
@@ -433,6 +464,44 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
     this.restartRequested = true;
     await this.quitGame();
+  }
+
+  /**
+   * Moves the server to `map`. A restart by default: `changelevel` crashes a stock server
+   * (exit code 5 during the level load, build 6796). While a match-end restart is pending, only
+   * the map it starts on changes.
+   */
+  async changeMap(map: string): Promise<void> {
+    this.launchMap = map;
+    if (this.config.game.mapChange === 'changelevel') {
+      await this.services.command(`changelevel ${map}`);
+      return;
+    }
+    if (this.matchEndTimer) {
+      this.log.info(`The next match will be on ${map}.`);
+      return;
+    }
+    await this.restart(`on map ${map}`);
+  }
+
+  /**
+   * A stock server stays on a finished match, and clients reconnecting to it (the game retries on
+   * its own) load in, see the match is over and drop, every 10 s. So the next match gets a
+   * fresh server.
+   */
+  private onGameState(state: string): void {
+    if (state !== 'PostGame' || this.matchEndTimer) return;
+    const map = this.bus.currentMap() ?? this.state.map ?? this.config.game.map;
+    const { afterMatch, afterMatchDelaySeconds } = this.config.restart;
+    this.log.info(afterMatch ? `The match is over; a new one starts in ${afterMatchDelaySeconds}s.` : 'The match is over.');
+    if (afterMatch) {
+      const seq = this.launchSeq;
+      this.matchEndTimer = setTimeout(() => {
+        this.matchEndTimer = undefined;
+        if (seq === this.launchSeq) void this.restart('for the next match');
+      }, afterMatchDelaySeconds * 1000);
+    }
+    this.toPlugins('match.ended', { map });
   }
 
   private scheduleDaily(): void {
@@ -483,6 +552,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   }
 
   private handleLine(line: string): void {
+    if (isConsoleNoise(line)) return;
     const ev = parseLogLine(line);
     if (ev) {
       switch (ev.kind) {
@@ -508,6 +578,9 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
             player: { name: ev.name, ...(ev.steamId ? { steamId: ev.steamId } : {}) },
             ...(ev.reason ? { reason: ev.reason } : {}),
           });
+          break;
+        case 'gameState':
+          this.onGameState(ev.state);
           break;
       }
     }

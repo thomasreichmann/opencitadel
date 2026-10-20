@@ -41,7 +41,7 @@ function fakeContext(config: WelcomeConfig) {
   };
 }
 
-const config: WelcomeConfig = { message: 'Hi {name}, welcome to {server}!', delaySeconds: 10, rules: ['No griefing', 'Have fun'], discord: 'https://discord.gg/abc' };
+const config: WelcomeConfig = { message: 'Hi {name}, welcome to {server}!', delaySeconds: 10, rules: ['No griefing', 'Have fun'], discord: 'https://discord.gg/abc', regreetMinutes: 30 };
 
 test('formats placeholders', () => {
   assert.equal(formatGreeting('{name}@{server} {name}', { name: 'Ann' }, 'S'), 'Ann@S Ann');
@@ -60,6 +60,20 @@ test('greets players who stay, once, after the delay', async () => {
   f.emit('player.connected', { player: { name: 'Botty', bot: true } });
   f.flushTimers();
   assert.deepEqual(f.told, ['Ann: Hi Ann, welcome to Midtown Brawl!']);
+
+  // Leaving and rejoining soon after a greeting doesn't repeat it, unless regreetMinutes is 0.
+  f.emit('player.disconnected', { player: ann });
+  f.emit('player.connected', { player: ann });
+  f.flushTimers();
+  assert.equal(f.told.length, 1);
+  const every = fakeContext({ ...config, regreetMinutes: 0 });
+  await plugin.setup(every.ctx);
+  every.players.push(ann);
+  for (let i = 0; i < 2; i++) {
+    every.emit('player.connected', { player: ann });
+    every.flushTimers();
+  }
+  assert.equal(every.told.length, 2);
 });
 
 test('!rules and !discord', async () => {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSteam3, toSteam64 } from '@opencitadel/protocol';
-import { parseDuration, parseLogLine, parseStatus, playerSteamId } from './parsers.js';
+import { isConsoleNoise, parseDuration, parseLogLine, parseStatus, playerSteamId } from './parsers.js';
 
 const CS2_STATUS = `Server:  Running [0.0.0.0:27015]
 Client:  Disconnected
@@ -87,6 +87,75 @@ test('log lines', () => {
   assert.deepEqual(parseLogLine(`Gameserver logged on to Steam, assigned identity steamid:${gslt}`), { kind: 'steamId', steamId: '[G:1:1234567]' });
   // A player's own id is not the server's.
   assert.equal(parseLogLine('Gameserver logged on to Steam, assigned identity steamid:76561197960287930'), undefined);
+});
+
+// RCON `status` from a live Deadlock dedicated server (build 6796, empty and hibernating). The
+// public address is replaced with a documentation address.
+const DEADLOCK_STATUS = `Server:  Running [127.0.0.1:27015]
+Client:  Disconnected
+----- Status -----
+@ Current  :  game
+source   : console
+hostname : OpenCitadel live test
+spawn    : 1
+version  : 48/48 10931 insecure  public
+steamid  : [A:1:4085873681:51989] (90295287688035345)
+udp/ip   : 127.0.0.1:27015 (public 203.0.113.5:27015)
+os/type  : Windows dedicated
+players  : 0 humans, 0 bots (0 max) (hibernating) (unreserved)
+---------spawngroups----
+loaded spawngroup(  1)  : SV:  [1: dl_midtown | main lump | mapload]
+---------players--------
+  id     time ping loss      state   rate adr name
+Citadel Specific
+===========================
+Game State: 1 (Init)
+#end
+`;
+
+test('real Deadlock status output (build 6796)', () => {
+  const s = parseStatus(DEADLOCK_STATUS);
+  assert.equal(s.hostname, 'OpenCitadel live test');
+  assert.equal(s.map, 'dl_midtown');
+  assert.equal(s.steamId, '[A:1:4085873681:51989]');
+  assert.equal(s.steamId64, '90295287688035345');
+  assert.equal(s.publicIp, '203.0.113.5');
+  assert.equal(s.humans, 0);
+  // An idle server reports "(0 max)"; the supervisor keeps the configured maximum in that case.
+  assert.equal(s.maxPlayers, 0);
+  assert.deepEqual(s.players, [], 'the "Citadel Specific" footer is not a player row');
+});
+
+test('real Deadlock status with a player connected over SDR (build 6796)', () => {
+  const withPlayer = DEADLOCK_STATUS.replace('players  : 0 humans, 0 bots (0 max) (hibernating)', 'players  : 1 humans, 0 bots (0 max) (not hibernating)')
+    .replace("  id     time ping loss      state   rate adr name\n", "  id     time ping loss      state   rate adr name\n   0    00:15    0    0     active 196608 [U:1:22202]:0 'Alice'\n")
+    .replace('Game State: 1 (Init)', 'Game State: 7 (GameInProgress)');
+  const s = parseStatus(withPlayer);
+  assert.equal(s.humans, 1);
+  assert.deepEqual(s.players, [{ id: 0, name: 'Alice', time: 15, ping: 0, loss: 0, state: 'active', steamId: '[U:1:22202]', steamId64: '76561197960287930' }]);
+});
+
+test('real Deadlock console lines (build 6796, captured from a live dedicated server)', () => {
+  const live = { kind: 'steamId', steamId: '[A:1:3520943121:51989]' };
+  assert.deepEqual(parseLogLine('10/19 23:56:49 [Server] SV:  ServerSteamID=[A:1:3520943121:51989] (90295287123104785).'), live);
+  assert.deepEqual(parseLogLine('10/19 23:56:49 [SteamNetSockets] Gameserver logged on to Steam, assigned identity steamid:90295287123104785'), live);
+  assert.deepEqual(parseLogLine('10/19 23:56:48 [Server] SV:  Spawn Server: dl_midtown'), { kind: 'map', map: 'dl_midtown' });
+  assert.deepEqual(parseLogLine('10/19 23:56:47 Loading map "dl_midtown"'), { kind: 'map', map: 'dl_midtown' });
+  // A second fake prefix inside the line is not stripped.
+  assert.equal(parseLogLine('10/19 23:56:49 [Server] [Server] SV:  ServerSteamID=[A:1:3520943121:51989] (90295287123104785).'), undefined);
+  assert.equal(parseLogLine('10/19 23:56:49 [Server] x SV:  ServerSteamID=[A:1:3520943121:51989] (90295287123104785).'), undefined);
+});
+
+test('match phases and console noise (build 6796)', () => {
+  assert.deepEqual(parseLogLine('10/20 00:53:10 ChangeGameState: PostGame (8)'), { kind: 'gameState', state: 'PostGame', id: 8 });
+  assert.deepEqual(parseLogLine('10/20 00:53:20 ChangeGameState: End (11)\r'), { kind: 'gameState', state: 'End', id: 11 });
+  // Whole-line only, so a player name can't end the match.
+  assert.equal(parseLogLine('Player [0]ChangeGameState: PostGame (8) changing team 0->2 in game mode 0')?.kind, undefined);
+  assert.equal(parseLogLine('10/20 00:53:10 [All Chat][Alice (0)]: ChangeGameState: PostGame (8)'), undefined);
+  assert.equal(parseLogLine('10/20 00:53:10 [Server] ChangeGameState: PostGame (8) gg'), undefined);
+  assert.ok(isConsoleNoise('10/20 00:09:53 CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents'));
+  assert.ok(isConsoleNoise('CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents\r'));
+  assert.ok(!isConsoleNoise('10/20 00:09:53 [Server] SV:  Spawn Server: dl_midtown'));
 });
 
 test('player names cannot spoof the server SteamID', () => {

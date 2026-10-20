@@ -21,6 +21,8 @@ export interface HostServices {
   /** Private message via the bridge; falls back to `say` with the player's name prefixed. */
   tell(player: Player, message: string): Promise<void>;
   kick(player: Player, reason?: string): Promise<void>;
+  /** Moves the server to a map (validated by the caller), the way `game.mapChange` says. */
+  changeMap(map: string): Promise<void>;
   /** True when the player's SteamID is in `config.admins`. Undefined (host console) is admin. */
   isAdmin(player: Player | undefined): boolean;
   logger(component: string): Logger;

@@ -57,6 +57,9 @@ export function fakeServices(serverDir: string, overrides: Partial<HostServices>
     async kick(player, reason) {
       svc.kicks.push({ player, reason });
     },
+    async changeMap(map) {
+      svc.commands.push(`changelevel ${map}`);
+    },
     isAdmin(player) {
       return !player || (!!player.steamId && svc.admins.has(player.steamId));
     },

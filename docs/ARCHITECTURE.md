@@ -46,6 +46,24 @@ plugins distributed through a registry.
   framework for Deadlock servers, launched as `game/bin/win64/deadworks.exe`. It is the right
   place for gameplay-level plugins; OpenCitadel builds around it rather than duplicating it.
 
+Checked against a live stock server (build 6796, October 2026) and handled by the host:
+
+* console.log lines start with `MM/DD HH:MM:SS [Channel] `; the same lines on stdout don't.
+* The server prints `CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents` every frame
+  when its stdin isn't a console, with or without `-console`: about 400 MB a day in console.log.
+  The host reads stdout by default and drops the line.
+* RCON's TCP listener binds to one local address of the engine's choosing (a VirtualBox adapter,
+  on the test machine); `+ip 127.0.0.1` pins it to loopback without affecting UDP or SDR.
+* RCON output arrives on a later tick, stamped with the id of the most recent packet the server
+  received, so the classic empty-packet terminator can't mark the end of a reply.
+* The server doesn't answer A2S queries.
+* `say` shows quotes verbatim, and an unquoted `//` starts a comment.
+* `status` shows an SDR player's SteamID where the address would be: `[U:1:22202]:0`.
+* `ChangeGameState: <Name> (<n>)` lines trace the match. After `PostGame (8)` and `End (11)`
+  the server stays on the finished match; a client reconnecting to it loops through loading
+  every 10 s, and each rejoin resets the server's own 120 s shutdown timer.
+* `changelevel` kills the process (exit code 5) during the level load.
+
 ## Packages
 
 | Path | Name | What it is |
@@ -305,12 +323,13 @@ server.json                 config (mode 0600: holds the server token and RCON p
     "convars": {},                // written into the generated cfg
     "extraArgs": [],
     "patchGameinfo": true,        // re-apply the P2P edits before every start
-    "logSource": "condebug"       // "condebug" (tail citadel/console.log) | "stdout"
+    "logSource": "stdout",        // "stdout" | "condebug" (tail citadel/console.log)
+    "mapChange": "restart"        // "restart" (relaunch on the new map) | "changelevel"
   },
   "rcon": { "enabled": true, "password": "<generated>" },
   "publicAddress": null,          // "203.0.113.5:27015" to advertise a direct address; null = SDR only
   "master": { "url": "http://localhost:8080", "serverId": null, "token": null, "listed": true },
-  "restart": { "onCrash": true, "maxBackoffSeconds": 300, "dailyAt": null },
+  "restart": { "onCrash": true, "maxBackoffSeconds": 300, "dailyAt": null, "afterMatch": true, "afterMatchDelaySeconds": 20 },
   "admins": [],                   // SteamIDs ([U:1:…] or 7656…) allowed to run admin chat commands
   "bridge": { "enabled": true, "port": 27100 },
   "privacy": { "showPlayerNames": false },
@@ -336,6 +355,9 @@ with `OPENCITADEL_BRIDGE=127.0.0.1:<bridge.port>` and `OPENCITADEL_BRIDGE_TOKEN=
 in the environment. Crashes restart with exponential backoff (5 s doubling to
 `maxBackoffSeconds`, reset after 10 minutes of uptime). `dailyAt: "05:00"` restarts at that
 local time, announcing it in chat 5 and 1 minutes before when `server.chat` is possible.
+`ChangeGameState: PostGame` emits `match.ended` and, with `afterMatch`, schedules a restart
+`afterMatchDelaySeconds` later. `changeMap()` is a restart with `+map <new map>` (kept for later
+crash restarts); inside the post-match window it only sets that map.
 
 ### Event sources
 
@@ -343,10 +365,11 @@ All three feed one event bus (`PluginEvents` in the SDK); each event is emitted 
 several sources see it (the bridge wins, then RCON, then the log; RCON never sees chat, so log
 chat lines are dropped only while the bridge is connected).
 
-1. **Console log** (`-condebug` → `game/citadel/console.log`, or stdout): tailed from the
-   launch offset. Parsers recognise the server SteamID (`[A:1:…]` / `[G:1:…]` on a line mentioning
-   Steam ID), map loads, and Source-style `"Name<uid><[U:1:…]><team>" say "text"` chat lines.
-   Unknown lines are just `console.line` events.
+1. **Console log** (stdout, or with `logSource: "condebug"` `game/citadel/console.log` tailed
+   from the launch offset). Parsers recognise the server SteamID (whole engine lines only, so a
+   player name can't fake one), map loads, match phases, and Source-style
+   `"Name<uid><[U:1:…]><team>" say "text"` chat lines. Unknown lines are just `console.line`
+   events; the per-frame stdin noise line is dropped.
 2. **RCON** (`-usercon`, `rcon_password`): connects once the server is up and polls `status`
    every 10 s. The parser is tolerant of the Source 2 `status` layout (`hostname`, `map`/`spawn`,
    `steamid`, `players : N humans, M bots (K max)`, then a player table). Player-list diffs produce

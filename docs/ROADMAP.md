@@ -12,37 +12,43 @@ maintainer has to decide or provide.
 
 ## Now
 
-### 1. Validate against a real Deadlock server
+### 1. Finish validating against a real Deadlock server
 
-**Why.** Everything so far has been tested end to end against a stand-in for the game
-(`packages/host/src/testing/fake-game.ts`), never a live `deadlock.exe -dedicated`. A few
-behaviours are inferred rather than observed, and if any is wrong, hosting or joining breaks.
+**Why.** Until October 2026 everything was tested against a stand-in for the game
+(`packages/host/src/testing/fake-game.ts`). Behaviour that was inferred rather than observed
+breaks hosting or joining when it's wrong.
 
-**Verify.**
-* **Status and logs.** RCON `status` output layout: hostname, map, the `steamid` line, the
-  player table and the `public` address format. The server's SteamID log lines
-  (`SV:  ServerSteamID=[A:1:…] (…)`, `Gameserver logged on to Steam, assigned identity …`) and
-  the map-load lines.
-* **RCON.** RCON answers on the game port over TCP with `-usercon` and an exec'd
-  `rcon_password`.
-* **Patching and queries.** The `gameinfo.gi` P2P edits make `connect [A:1:…]` work over Steam
-  Datagram Relay, and the client still plays normally with them in place. A2S_INFO answers on
-  the game port, so master verification works.
-* **Joining.** `steam://run/1422450//+connect [A:1:…]/` launches into the server, and
-  `steam://connect/<ip:port>` works for direct addresses.
+**Verified** on a stock server, build 6796, with the host running under WSL:
+* The host launches the server, patches `gameinfo.gi`, and reads the SteamID, map and match
+  phases from its output.
+* It drives the server over RCON (`status`, `say`, `quit`) and lists it on a master.
+* A client on the same machine joined over Steam Datagram Relay with the password, and the
+  welcome plugin greeted it.
+* A crash restart and a graceful stop both worked.
+* Parser fixtures now come from captured output.
+
+The test found eleven bugs, all fixed; ARCHITECTURE.md lists the server behaviour behind them.
+It also showed that a stock server doesn't answer A2S (see the limitations below).
+
+**Still to verify.**
+* **Joining from the browser.** The test client was started by
+  `steam://run/1422450//+connect [A:1:…]/`, but whether `+connect` alone completes the join
+  wasn't isolated. `steam://connect/<ip:port>` for direct addresses is untested.
+* **A remote player.** Every client so far ran on the server's machine.
+* **Chat on a stock server.** No player chat appeared in the server output during the test. If
+  a stock server never prints chat, chat commands need the bridge.
+* **`map <name>`.** It is untested; `changelevel` crashes the server.
 * **Deadworks bridge.** `say`, `tell`, `kick`, `command` and `players` inside a live server
-  (`bridge/deadworks`).
-* **Plugins.** Plugins receive real player, chat and map events through the bridge.
+  (`bridge/deadworks`), and plugins receiving real player, chat and map events through it.
 
-**Done when.** A host on a real install:
-* lists itself on a master with the right SteamID, map and players;
-* a second client joins from `citadel-browser`;
-* the welcome plugin greets that client;
-* parser fixtures are updated from captured real output.
+**Done when.**
+* A client on another network joins from `citadel-browser`.
+* The bridge works on a live Deadworks server.
 
-**Needs.** A machine with Deadlock installed, at a time nobody is playing on it. The test
-launches the game in server mode and edits `gameinfo.gi`; `citadel-host gameinfo unpatch`
-reverses the edit.
+**Needs.**
+* A second machine or a friend for the remote join.
+* A Deadworks install for the bridge.
+* `citadel-host gameinfo unpatch` reverses the `gameinfo.gi` edit afterwards.
 
 ### 2. Coordinate with Deadworks and Deadlock Mod Manager
 
@@ -129,7 +135,7 @@ Accounts are API-key only today. Add a web sign-in (passkeys or TOTP), and a das
 Account keys could then be scoped and short-lived.
 
 ### Harder-to-spoof listings
-* Cross-check self-reported player counts against A2S_PLAYER.
+* Cross-check self-reported player counts against A2S_PLAYER, for servers that answer A2S.
 * Bind native heartbeats to the server's source IP, and cap listings per IP.
 * Add separate verify, dead and ghost timers, in the style of Northstar's Atlas master server.
 * Label explicit trust tiers in the browser: A2S-verified, SDR-only (self-reported) and
@@ -142,12 +148,18 @@ via its launcher bridge, rather than reinventing the injection.
 
 ## Known limitations (0.1)
 
-* **Real-game behaviour is unverified;** see item 1.
+* **Partly verified on the real game.** Stock servers work on build 6796; see item 1 for what is
+  left.
+* **Map changes restart a stock server.** `changelevel` crashes it, so changing maps (including
+  after a match) disconnects everyone, and players reconnect from the browser.
 * **Sandbox overhead.** Host plugins run in a WebAssembly sandbox, one worker thread each. That
   costs about 14 MB of memory and 50 ms of load time per plugin.
 * **Deadworks addons need a config edit.** Content addons installed by `citadel-pkg` for
   Deadworks still have to be named in `serverbrowser.content_addons` by hand; the command
   prints the lines to add.
-* **Relay-only servers can't be verified.** The master can't A2S-probe servers reachable only
-  through Steam Datagram Relay, so their player counts are self-reported.
+* **Stock servers can't be verified.** The master's A2S probe gets no answer from a stock
+  server, even with its port forwarded, and can't reach relay-only servers at all. Their
+  player counts are self-reported. Deadworks servers answer A2S. One idea is to check stock
+  servers against Steam's own server list (Web API `IGameServersService/GetServerList`) by
+  SteamID instead, if anonymous Deadlock servers show up there.
 * **No hosted instance yet;** see item 3.

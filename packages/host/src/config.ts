@@ -39,7 +39,14 @@ export const hostConfigValidator = v.object({
       convars: v.withDefault(v.record(v.string({ max: 500 }), { maxKeys: 256, key: v.string({ max: 64, pattern: /^[A-Za-z0-9_]+$/ }) }), {}),
       extraArgs: v.withDefault(v.array(v.string({ max: 500 }), { max: 64 }), []),
       patchGameinfo: v.withDefault(v.bool(), true),
-      logSource: v.withDefault(v.literal(['condebug', 'stdout'] as const), 'condebug'),
+      // stdout carries the same lines as -condebug's console.log (without its timestamp prefix),
+      // and leaves no file on disk to grow ~400 MB a day from per-frame console noise.
+      logSource: v.withDefault(v.literal(['condebug', 'stdout'] as const), 'stdout'),
+      /**
+       * How a plugin's map change happens. `restart` relaunches the server on the new map;
+       * `changelevel` asks the running server, which crashes a stock server (build 6796).
+       */
+      mapChange: v.withDefault(v.literal(['restart', 'changelevel'] as const), 'restart'),
     }),
   ),
   rcon: section(
@@ -62,6 +69,13 @@ export const hostConfigValidator = v.object({
       onCrash: v.withDefault(v.bool(), true),
       maxBackoffSeconds: v.withDefault(v.int({ min: 5, max: 3600 }), 300),
       dailyAt: v.optional(v.string({ pattern: /^([01]\d|2[0-3]):[0-5]\d$/ })),
+      /**
+       * Start a fresh server once a match ends. A stock server otherwise stays on the finished
+       * match, and clients that reconnect to it load in, see it is over and drop, forever.
+       */
+      afterMatch: v.withDefault(v.bool(), true),
+      /** Seconds after the match ends (leaves the post-game screen up; the game ends it after 10 s). */
+      afterMatchDelaySeconds: v.withDefault(v.int({ min: 0, max: 600 }), 20),
     }),
   ),
   admins: v.withDefault(v.array(v.string({ max: 40 }), { max: 256 }), []),

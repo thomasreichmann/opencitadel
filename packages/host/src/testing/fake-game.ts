@@ -8,7 +8,9 @@
  *  - prints (and with -condebug appends to citadel/console.log) realistic startup lines, including
  *    a fresh anonymous `[A:1:…:…]` Steam ID and the map load;
  *  - serves Source RCON on TCP 127.0.0.1:<hostport> when -usercon and rcon_password are set
- *    (status, say, changelevel/map, kick, kickid, quit, echo; test hooks _crash, _chat, _join, _leave);
+ *    (status, say, map, kick, kickid, quit, echo; `changelevel` exits with code 5 like the real
+ *    server; test hooks _crash, _chat, _join, _leave, _endmatch);
+ *  - prints the real server's per-frame stdin noise line every 50 ms;
  *  - answers A2S_INFO on UDP 127.0.0.1:<hostport>;
  *  - with --fake-bridge / FAKE_BRIDGE=1, connects to OPENCITADEL_BRIDGE and plays a script:
  *    player.connected (BridgeBob), chat.message "!help", player.disconnected.
@@ -89,9 +91,14 @@ function main(): void {
     .filter(Boolean)
     .map((name, i) => ({ slot: 2 + i, name, steamId64: String(76561198000000000n + BigInt(2 + i)), connectedAt: Date.now() - 62_000, address: `198.51.100.${7 + i}:27005` }));
 
-  const log = (line: string) => {
-    process.stdout.write(line + '\n');
-    if (opts.condebug) appendFileSync(consoleLog, line + '\r\n');
+  // Like the real server: `10/19 23:56:49 [Server] SV:  …` (the channel tag is on most lines, not all).
+  const log = (line: string, channel?: string) => {
+    const d = new Date();
+    const two = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${two(d.getMonth() + 1)}/${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+    const full = `${stamp} ${channel ? `[${channel}] ` : ''}${line}`;
+    process.stdout.write(full + '\n');
+    if (opts.condebug) appendFileSync(consoleLog, full + '\r\n');
   };
 
   const fmtTime = (ms: number) => {
@@ -125,7 +132,7 @@ function main(): void {
 
   const loadMap = (name: string) => {
     map = name;
-    log(`SV:  Spawn Server: ${name}`);
+    log(`SV:  Spawn Server: ${name}`, 'Server');
     log(`loaded spawngroup(  1)  : SV:  [1: ${name} | main lump | mapload]`);
   };
 
@@ -148,9 +155,14 @@ function main(): void {
       case 'say':
         log(`[All Chat][Console (0)]: ${unquote(arg)}`);
         return '';
+      // A real stock server dies during the level load after `changelevel` (build 6796).
       case 'changelevel':
-      case 'map':
         if (!rest[0]) return 'usage: changelevel <map>';
+        log(`SV:  Level loading started for '${rest[0]}'`, 'Server');
+        setTimeout(() => process.exit(5), 10);
+        return `Changelevel to ${rest[0]}`;
+      case 'map':
+        if (!rest[0]) return 'usage: map <map>';
         setTimeout(() => loadMap(rest[0]!), 10);
         return '';
       case 'kick':
@@ -182,6 +194,12 @@ function main(): void {
       }
       case '_leave':
         return removePlayer((p) => p.name === rest[0], 'Disconnect') ? '' : `No player named ${rest[0]}`;
+      case '_endmatch':
+        log('Citadel: Bosses killed, triggering victory condition');
+        log('Shutting down match - game over', 'Server');
+        log('ChangeGameState: PostGame (8)');
+        setTimeout(() => log('ChangeGameState: End (11)'), 100);
+        return '';
       default:
         return `Unknown command "${word}"`;
     }
@@ -190,9 +208,17 @@ function main(): void {
   // ---- startup lines
   log('Source2Main: fake Deadlock dedicated server (OpenCitadel test double)');
   // The two SteamID lines Deadlock really prints (as recorded in Deadworks' launcher tests).
-  setTimeout(() => log(`Gameserver logged on to Steam, assigned identity steamid:${steamId64}`), 40);
-  setTimeout(() => log(`SV:  ServerSteamID=${steamId} (${steamId64}).`), 60);
-  setTimeout(() => loadMap(map), 80);
+  setTimeout(() => log(`Gameserver logged on to Steam, assigned identity steamid:${steamId64}`, 'SteamNetSockets'), 40);
+  setTimeout(() => log(`SV:  ServerSteamID=${steamId} (${steamId64}).`, 'Server'), 60);
+  setTimeout(() => {
+    loadMap(map);
+    for (const [i, state] of ['WaitingForPlayersToJoin', 'HeroSelection', 'MatchIntro', 'WaitForMapToLoad', 'PreGameWait', 'GameInProgress'].entries()) {
+      log(`ChangeGameState: ${state} (${i + 2})`);
+    }
+  }, 80);
+  // The real server prints this every frame, since its stdin is never a console under the host.
+  const noise = setInterval(() => log('CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents'), 50);
+  noise.unref();
 
   // ---- RCON
   if (opts.usercon && cvars.rcon_password) {

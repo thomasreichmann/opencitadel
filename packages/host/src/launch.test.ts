@@ -8,7 +8,8 @@ import { CFG_NAME, buildServerArgs, buildServerCfg, cfgQuote, planLaunch } from 
 test('server args follow the documented order, map last', () => {
   const config = parseHostConfig({ rcon: { password: 'pw' }, game: { port: 27020, map: 'dl_streets' } });
   const args = buildServerArgs(config);
-  assert.deepEqual(args.slice(0, 7), ['-dedicated', '-console', '-dev', '-insecure', '-allow_no_lobby_connect', '-usercon', '-condebug']);
+  assert.deepEqual(args.slice(0, 6), ['-dedicated', '-console', '-dev', '-insecure', '-allow_no_lobby_connect', '-usercon']);
+  assert.ok(!args.includes('-condebug'), 'the log comes from stdout by default');
   assert.ok(!args.includes('-maxplayers'));
   assert.deepEqual(args.slice(args.indexOf('+hostport'), args.indexOf('+hostport') + 4), ['+hostport', '27020', '+exec', CFG_NAME]);
   assert.deepEqual(args.slice(-2), ['+map', 'dl_streets']);
@@ -16,12 +17,21 @@ test('server args follow the documented order, map last', () => {
 });
 
 test('optional flags', () => {
-  const config = parseHostConfig({ rcon: { enabled: false, password: 'pw' }, game: { maxPlayers: 24, logSource: 'stdout', extraArgs: ['+sv_cheats', '1'] } });
+  const config = parseHostConfig({ rcon: { enabled: false, password: 'pw' }, game: { maxPlayers: 24, logSource: 'condebug', extraArgs: ['+sv_cheats', '1'] } });
   const args = buildServerArgs(config);
   assert.ok(!args.includes('-usercon'));
-  assert.ok(!args.includes('-condebug'));
+  assert.ok(args.includes('-condebug'));
   assert.deepEqual(args.slice(args.indexOf('-maxplayers'), args.indexOf('-maxplayers') + 2), ['-maxplayers', '24']);
   assert.deepEqual(args.slice(-4), ['+sv_cheats', '1', '+map', 'dl_midtown']);
+});
+
+test('RCON is pinned to loopback unless the admin chooses a bind address', () => {
+  const args = buildServerArgs(parseHostConfig({}));
+  assert.equal(args[args.indexOf('+ip') + 1], '127.0.0.1');
+  assert.ok(args.indexOf('+ip') < args.indexOf('+map'));
+  const custom = buildServerArgs(parseHostConfig({ game: { extraArgs: ['-ip', '0.0.0.0'] } }));
+  assert.equal(custom.filter((a) => a === '+ip').length, 0);
+  assert.equal(custom[custom.indexOf('-ip') + 1], '0.0.0.0');
 });
 
 test('cfg escapes values so they cannot inject commands', () => {

@@ -40,6 +40,7 @@ export const EVENT_NAMES: ReadonlySet<string> = new Set<EventName>([
   'server.ready',
   'server.stopped',
   'map.changed',
+  'match.ended',
   'player.connected',
   'player.disconnected',
   'chat.message',
@@ -508,7 +509,7 @@ export class PluginRuntime implements PluginHost {
       changeMap(map) {
         need('server.command');
         if (!MAP_NAME.test(map)) throw new Error(`Invalid map name "${map}"`);
-        return services.command(`changelevel ${map}`).then(() => undefined);
+        return services.changeMap(map);
       },
       findPlayer(query) {
         return findPlayer(services.getState().players, query);

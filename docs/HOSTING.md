@@ -69,7 +69,7 @@ The host does the following:
 
 * Launches the game with the flags in [ARCHITECTURE.md](ARCHITECTURE.md#launch).
 * Writes secrets to `citadel/cfg/opencitadel_server.cfg` instead of the command line.
-* Tails the console log.
+* Reads the server's console output.
 * Connects over RCON.
 * Learns the server's Steam ID.
 * Heartbeats the master every 30 seconds.
@@ -90,6 +90,18 @@ Ctrl+C stops the server cleanly and tells the master it went offline. Crashes re
 exponential backoff. Set `restart.dailyAt` (e.g. `"05:00"`) for a daily restart; players get
 warnings in chat beforehand.
 
+**After a match.** A stock server stays on a finished match. Players who reconnect to it (the
+game retries on its own) load in, see the match is over and drop out again, every 10 seconds.
+So 20 seconds after a match ends, once the post-game screen has had its time, the host starts a
+fresh server. Tune that with `restart.afterMatchDelaySeconds`, or turn it off with
+`restart.afterMatch: false`. The `map-rotation` plugin uses this restart to move on to the next
+map.
+
+**Map changes** restart the server on the new map, because `changelevel` crashes a stock server
+(build 6796). Everyone is disconnected, and an anonymous server comes back with a new Steam ID,
+which the listing picks up. If your server handles `changelevel` (a later game build, or
+Deadworks), set `game.mapChange: "changelevel"`.
+
 ### How players reach you
 
 Each listing carries one or both of these connect targets:
@@ -97,13 +109,15 @@ Each listing carries one or both of these connect targets:
 | Target | What it is | What you need |
 |---|---|---|
 | **Steam Datagram Relay** (default) | The server's anonymous Steam ID `[A:1:…]`; players join through Valve's relay network. | No port forwarding. |
-| **Direct address** | Set `"publicAddress": "203.0.113.5:27015"`. Players connect directly. The master probes the address over A2S, marks the listing *verified*, and from then on trusts the probe's player count over the host's report. | UDP 27015 forwarded to the server. |
+| **Direct address** | Set `"publicAddress": "203.0.113.5:27015"`. Players connect directly. The master probes the address over A2S, marks the listing *verified*, and from then on trusts the probe's player count over the host's report. A stock server doesn't answer A2S (checked on build 6796), so in practice only servers that do, such as Deadworks ones, get verified. | UDP 27015 forwarded to the server. |
 
 The anonymous Steam ID changes on every launch. The host re-reads it and re-publishes it after
 each restart, so listings stay joinable.
 
-RCON listens on the game port over **TCP**. Keep TCP 27015 closed to the internet unless you
-need remote RCON. The generated password is strong, but nothing beyond it guards RCON.
+RCON listens on the game port over **TCP**. The host binds it to 127.0.0.1 (`+ip 127.0.0.1`), so
+it isn't reachable from the network; players' UDP traffic is unaffected. For remote RCON, pass
+your own `-ip` in `game.extraArgs` and firewall TCP 27015 to the addresses you use: the
+generated password is strong, but nothing beyond it guards RCON.
 
 ### Deadworks servers
 
@@ -167,7 +181,7 @@ exactly the same reviewed plugin set.
 
 ### Several servers on one machine
 
-`console.log` and the generated cfg live inside the game folder, so each running server needs its
+The generated cfg (and `console.log`, with `logSource: "condebug"`) lives inside the game folder, so each running server needs its
 own copy of the game folder. The copy can be a symlink tree like the one Deadworks' Docker setup
 uses. In each server's `server.json`:
 
@@ -203,4 +217,6 @@ also allows cross-origin reads, so other sites and tools can build on your list.
 | Players can't connect via Steam ID | `citadel-host gameinfo status` must report the P2P edits as present. Restart after patching. |
 | Not marked verified | `publicAddress` must be reachable over UDP from the master; private/LAN addresses are never probed. |
 | RCON never connects | `rcon.enabled` must be true and the port free; check the console log for the bind error. |
+| Players stuck on a loading screen after a match | Keep `restart.afterMatch` on (the default after 0.1.1). |
+| `game/citadel/console.log` grows by hundreds of MB a day | The server prints a line every frame because its input isn't a console. Set `game.logSource: "stdout"` (the default after 0.1.1; servers set up with 0.1.0 or 0.1.1 have `"condebug"` written in `server.json`). |
 | `deadworks.exe` exits with code 78 | That Deadworks release doesn't support the current game build yet; wait for an update. |

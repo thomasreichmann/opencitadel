@@ -12,7 +12,7 @@ function fakeContext(config: Partial<RotationConfig> = {}) {
   const changes: string[] = [];
   const state: Pick<ServerState, 'phase' | 'map' | 'players'> = { phase: 'running', map: 'dl_midtown', players: [] };
   const ctx = {
-    config: { maps: ['dl_midtown', 'dl_hideout', 'street_test'], emptyMinutes: 10, intervalMinutes: 0, rtvRatio: 0.5, ...config },
+    config: { maps: ['dl_midtown', 'dl_hideout', 'street_test'], emptyMinutes: 10, intervalMinutes: 0, rtvRatio: 0.5, afterMatch: true, ...config },
     log: { info() {}, warn() {}, error() {}, debug() {} },
     server: {
       state,
@@ -47,6 +47,20 @@ test('nextMap', () => {
   assert.equal(nextMap(['a', 'b'], 'zz', 0), 'b');
   assert.equal(nextMap(['a'], 'a', 0), undefined);
   assert.equal(nextMap([], 'a', 0), undefined);
+});
+
+test('a finished match moves on to the next map', async () => {
+  const f = fakeContext();
+  await plugin.setup(f.ctx);
+  f.state.players = players(2);
+  await f.emit('match.ended', { map: 'dl_midtown' });
+  assert.deepEqual(f.changes, ['dl_hideout']);
+  assert.equal(f.store.get('index'), 1);
+
+  const off = fakeContext({ afterMatch: false });
+  await plugin.setup(off.ctx);
+  await off.emit('match.ended', { map: 'dl_midtown' });
+  assert.deepEqual(off.changes, []);
 });
 
 test('rotates once after the server has been empty long enough', async () => {

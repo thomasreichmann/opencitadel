@@ -189,6 +189,7 @@ sources, and each event is delivered once even if several sources see it:
 | `server.ready` | `{ map, steamId? }` | console log / bridge |
 | `server.stopped` | `{ code, crashed }` | host |
 | `map.changed` | `{ map, previous? }` | console log / RCON `status` / bridge |
+| `match.ended` | `{ map }` | console log (`ChangeGameState: PostGame`) |
 | `player.connected` | `{ player }` | RCON `status` diff / bridge |
 | `player.disconnected` | `{ player, reason? }` | RCON `status` diff / bridge |
 | `chat.message` | `{ player, message, teamOnly }` | bridge, or a server that logs chat |
@@ -197,9 +198,14 @@ sources, and each event is delivered once even if several sources see it:
 | `tick` | `{ now }` | host, about once a second while running |
 
 `ctx.server.state.sources` tells you which sources are live: `{ rcon, log, bridge }`. Without
-the bridge, players are known by name and slot from `status`, not by SteamID, and chat (and so
-chat commands) depends on what the server logs. Plugins should degrade gracefully. For example,
+the bridge, players are known by name and slot from `status`, and by SteamID only when they came
+in over Steam Datagram Relay (their `status` row shows it in place of an address). Chat, and so
+chat commands, depends on what the server logs. Plugins should degrade gracefully. For example,
 `welcome` still greets without SteamIDs.
+
+After `match.ended` the host starts a fresh server (unless the admin turned
+`restart.afterMatch` off). Calling `ctx.server.changeMap()` from the handler picks the map it
+starts on, which is how `map-rotation` rotates after each match.
 
 Prefer `tick`'s `now` over `Date.now()` for time-based logic. It makes plugins trivially
 testable (see `plugins/map-rotation`).
@@ -215,7 +221,7 @@ ctx.server.command('status')      // → output; via the bridge when connected, 
 ctx.server.say('Hello all')
 ctx.server.tell(player, 'Hi')     // private via the bridge, else falls back to say
 ctx.server.kick(player, 'reason')
-ctx.server.changeMap('dl_hideout')
+ctx.server.changeMap('dl_hideout') // restarts the server on that map by default (game.mapChange)
 ctx.server.findPlayer('#3' | '[U:1:123]' | '7656…' | 'ann')   // slot, SteamID, exact or unique name prefix
 
 ctx.commands.register(name, { description, access: 'everyone' | 'admin', aliases, handler })

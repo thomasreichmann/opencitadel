@@ -13,7 +13,15 @@ export type LogEvent =
   | { kind: 'map'; map: string }
   | { kind: 'chat'; name: string; userId?: number; steamId?: string; team?: string; message: string; teamOnly: boolean }
   | { kind: 'connected'; name: string; userId?: number; steamId?: string; address?: string }
-  | { kind: 'disconnected'; name: string; userId?: number; steamId?: string; reason?: string };
+  | { kind: 'disconnected'; name: string; userId?: number; steamId?: string; reason?: string }
+  | { kind: 'gameState'; state: string; id: number };
+
+/**
+ * Deadlock's match phases, from `ChangeGameState: GameInProgress (7)` (build 6796): Init (1),
+ * WaitingForPlayersToJoin (2), HeroSelection (3), MatchIntro (4), WaitForMapToLoad (5),
+ * PreGameWait (6), GameInProgress (7), PostGame (8), End (11).
+ */
+const GAME_STATE = /^ChangeGameState: ([A-Za-z]{1,40}) \((\d{1,3})\)$/;
 
 const SERVER_STEAMID = /\[(?:A:1:\d{1,10}:\d{1,7}|G:1:\d{1,10})\]/;
 const SERVER_STEAMID_SRC = '\\[(?:A:1:\\d{1,10}:\\d{1,7}|G:1:\\d{1,10})\\]';
@@ -72,12 +80,34 @@ function tagFields(m: RegExpExecArray) {
   return { name: m[1]!, userId: Number(m[2]), steamId: playerSteamId(m[3]!), team: m[4] || undefined };
 }
 
+/**
+ * Deadlock prefixes every console line with a timestamp and a channel tag:
+ * `10/19 23:56:49 [Server] SV:  ServerSteamID=[A:1:…] (…).` Strips exactly one of each, so the
+ * whole-line patterns below see what the engine wrote (and a player name can't add a second).
+ */
+/**
+ * Printed every frame (~60 a second, for as long as the server runs) when the server's stdin is
+ * not a console, which it never is under the host. Seen on build 6796 with and without -console.
+ */
+export function isConsoleNoise(line: string): boolean {
+  return /CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents\s*$/.test(line);
+}
+
+export function stripLogPrefix(line: string): string {
+  return line
+    .trim()
+    .replace(/^\d{2}\/\d{2} \d{2}:\d{2}:\d{2} /, '')
+    .replace(/^\[[A-Za-z0-9_ ]{1,32}\] /, '');
+}
+
 export function parseLogLine(line: string): LogEvent | undefined {
-  const trimmed = line.trim();
+  const body = stripLogPrefix(line);
   for (const match of SERVER_ID_LINES) {
-    const steamId = match(trimmed);
+    const steamId = match(body);
     if (steamId) return { kind: 'steamId', steamId };
   }
+  const state = GAME_STATE.exec(body);
+  if (state) return { kind: 'gameState', state: state[1]!, id: Number(state[2]) };
   for (const re of MAP_PATTERNS) {
     const m = re.exec(line);
     if (m) return { kind: 'map', map: m[1]! };
@@ -158,6 +188,17 @@ function parseSource2Row(line: string): StatusPlayer | undefined {
   else if (tokens[5]) adr = /^\d+(\D.*)$/.exec(tokens[5])?.[1];
   if (adr && adr !== 'unknown' && /:\d+$/.test(adr)) player.address = adr;
   if (adr === 'BOT') player.bot = true;
+  // Players connected over Steam Datagram Relay show their SteamID as the address:
+  // `0  00:15  0  0  active 196608 [U:1:22202]:0 'Alice'` (Deadlock build 6796).
+  const relayed = adr ? /^(\[U:1:\d{1,10}\]):\d+$/.exec(adr) : null;
+  if (relayed) {
+    const steamId = playerSteamId(relayed[1]!);
+    if (steamId) {
+      player.steamId = steamId;
+      player.steamId64 = toSteam64(parseSteam3(steamId)!);
+      delete player.address;
+    }
+  }
   return player;
 }
 
@@ -239,7 +280,7 @@ export function parseStatus(text: string): StatusInfo {
       case 'udp/ip': {
         info.localAddress = /^(\S+)/.exec(value)?.[1];
         // Deadlock prints `(public 203.0.113.5:27015)`; CS2 prints `(public ip: 203.0.113.5)`.
-        const pub = /public(?: ip)?:?\s*([0-9a-fA-F.:]+)/.exec(value)?.[1];
+        const pub = /public(?: ip)?:?\s*(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]*:[0-9a-fA-F:]+)/.exec(value)?.[1];
         if (pub) info.publicIp = pub;
         break;
       }
