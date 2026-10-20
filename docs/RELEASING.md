@@ -32,17 +32,22 @@ workflow); only the check job runs.
 * **GitHub:** the `npm` environment only accepts deployments from `v*` tags. Add required
   reviewers under Settings → Environments → npm if you want a human to approve each release.
 * **npm:** each package trusts `thomasreichmann/opencitadel`, workflow `release.yml`, environment
-  `npm`, with direct publishing allowed. To view the entries:
+  `npm`, with direct publishing allowed.
+
+  Both commands below need 2FA. Pass the code as `--otp=<code>`: `npm trust` treats a separate
+  `--otp <code>` as a stray argument. One code covers all six packages if you run them together.
+
+  To view the entries:
 
   ```sh
-  npx npm@11 trust list @opencitadel/host
+  npx npm@11 trust list @opencitadel/host --otp=<code>
   ```
 
-  To recreate them (needs 2FA once; npm allows a 5-minute window for the rest):
+  To recreate them:
 
   ```sh
   for p in protocol gamefiles plugin-sdk host master client; do
-    npx npm@11 trust github @opencitadel/$p --file release.yml --repo thomasreichmann/opencitadel --env npm --allow-publish --yes
+    npx npm@11 trust github @opencitadel/$p --file=release.yml --repo=thomasreichmann/opencitadel --env=npm --allow-publish --yes --otp=<code>
   done
   ```
 
