@@ -1,6 +1,6 @@
 {
   "name": "@opencitadel/gamefiles",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deadlock install discovery, gameinfo.gi editing and launch helpers",
   "keywords": [
     "deadlock",

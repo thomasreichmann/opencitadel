@@ -1,6 +1,6 @@
 {
   "name": "@opencitadel/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "citadel-browser: find, join and sync content for community Deadlock servers",
   "keywords": [
     "deadlock",

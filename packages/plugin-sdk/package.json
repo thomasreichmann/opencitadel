@@ -1,6 +1,6 @@
 {
   "name": "@opencitadel/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Types and helpers for writing OpenCitadel host plugins",
   "keywords": [
     "deadlock",

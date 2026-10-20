@@ -1,6 +1,6 @@
 {
   "name": "@opencitadel/host",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "citadel-host: runs and supervises a Deadlock dedicated server, lists it, and loads plugins",
   "keywords": [
     "deadlock",

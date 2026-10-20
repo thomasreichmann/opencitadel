@@ -1,6 +1,6 @@
 {
   "name": "@opencitadel/master",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "citadel-master: open server list, web server browser and plugin registry for Deadlock",
   "keywords": [
     "deadlock",
