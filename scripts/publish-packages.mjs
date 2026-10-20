@@ -43,22 +43,29 @@ const published = (name) => {
   }
 };
 
-for (const m of manifests) {
-  for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
-    for (const [dep, range] of Object.entries(m.json[field] ?? {})) {
-      if (String(range).startsWith('workspace:')) m.json[field][dep] = version;
+// Pin workspace dependencies for the publish, and put the manifests back afterwards so a local
+// run leaves the checkout untouched.
+const originals = manifests.map((m) => readFileSync(m.file, 'utf8'));
+try {
+  for (const m of manifests) {
+    for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const [dep, range] of Object.entries(m.json[field] ?? {})) {
+        if (String(range).startsWith('workspace:')) m.json[field][dep] = version;
+      }
     }
+    writeFileSync(m.file, JSON.stringify(m.json, null, 2) + '\n');
   }
-  writeFileSync(m.file, JSON.stringify(m.json, null, 2) + '\n');
-}
 
-for (const m of manifests) {
-  const name = m.json.name;
-  if (!dryRun && published(name)) {
-    console.log(`= ${name}@${version} is already on the registry; skipping`);
-    continue;
+  for (const m of manifests) {
+    const name = m.json.name;
+    if (!dryRun && published(name)) {
+      console.log(`= ${name}@${version} is already on the registry; skipping`);
+      continue;
+    }
+    console.log(`${dryRun ? '~' : '+'} ${name}@${version}`);
+    execFileSync('npm', ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : [])], { cwd: join(repo, 'packages', m.dir), stdio: 'inherit' });
   }
-  console.log(`${dryRun ? '~' : '+'} ${name}@${version}`);
-  execFileSync('npm', ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : [])], { cwd: join(repo, 'packages', m.dir), stdio: 'inherit' });
+} finally {
+  manifests.forEach((m, i) => writeFileSync(m.file, originals[i]));
 }
 console.log(dryRun ? `Dry run complete for v${version}.` : `Published v${version}.`);

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { formatPublicKeyFile, generateSigningKey, packTarGz, packageTrustedComment, signData, verifySignature, type SecretKeyFile } from '@opencitadel/protocol';
 import { startMaster, type TestMaster } from './testutil.js';
+import { MASTER_VERSION } from './version.js';
 
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -153,7 +154,7 @@ test('registry info, and registries that require signatures', async () => {
   try {
     assert.deepEqual((await m.api('GET', '/v1/registry')).json, {
       requireSignatures: true,
-      version: '0.1.0',
+      version: MASTER_VERSION,
       name: 'Test Registry',
       publicUrl: 'https://registry.example',
       abuseContact: 'abuse@example.org',
@@ -173,7 +174,7 @@ test('registry info, and registries that require signatures', async () => {
   }
   const plain = await startMaster();
   try {
-    assert.deepEqual((await plain.api('GET', '/v1/registry')).json, { requireSignatures: false, version: '0.1.0', oidc: { github: { audience: 'opencitadel' } } });
+    assert.deepEqual((await plain.api('GET', '/v1/registry')).json, { requireSignatures: false, version: MASTER_VERSION, oidc: { github: { audience: 'opencitadel' } } });
   } finally {
     await plain.close();
   }
