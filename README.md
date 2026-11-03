@@ -78,6 +78,7 @@ node packages/client/dist/cli.js join <server-id>
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it fits together; HTTP API, bridge protocol, file formats |
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: tag, then npm trusted publishing with provenance |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | What's next, in priority order, and known limitations |
+| [docs/HOTSWAP.md](docs/HOTSWAP.md) | Research: toggling client mods without restarting the game |
 
 ## Repository layout
 
