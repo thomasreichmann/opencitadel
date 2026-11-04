@@ -1,0 +1,14 @@
+{
+  "id": "bhop",
+  "name": "Bhop (CS:S movement)",
+  "version": "0.1.0",
+  "kind": "deadworks",
+  "description": "A Counter-Strike: Source bunny-hop mode: exact CS:S movement simulated by the server, ported CS:S bhop maps with their original collision, teleports and bhop blocks, a run timer with zones, records and a HUD. Install ported maps (bhop-* content packages) alongside it.",
+  "author": "OpenCitadel",
+  "license": "MIT",
+  "repository": "https://github.com/thomasreichmann/opencitadel",
+  "homepage": "https://github.com/thomasreichmann/opencitadel/tree/main/modes/bhop",
+  "tags": ["bhop", "movement", "timer", "cs-source"],
+  "assemblies": ["bin/Release/net10.0/OpenCitadel.Bhop.dll"],
+  "engines": { "opencitadel": "^0.1.0", "deadworks": ">=0.6.3" }
+}

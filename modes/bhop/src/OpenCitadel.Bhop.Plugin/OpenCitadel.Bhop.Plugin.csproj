@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenCitadel.Bhop.Plugin</RootNamespace>
+    <AssemblyName>OpenCitadel.Bhop</AssemblyName>
+    <Description>Deadworks plugin: a Counter-Strike: Source bunny-hop mode for Deadlock servers.</Description>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Set to true to copy the built plugin into $(DeadlockManagedDir)/plugins after each build. -->
+    <DeployToGame Condition="'$(DeployToGame)' == ''">false</DeployToGame>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Deadworks treats every DLL in its plugins folder as a plugin, so the core library is compiled
+         into this assembly rather than shipped beside it. -->
+    <Compile Include="..\OpenCitadel.Bhop.Core\**\*.cs" Exclude="..\OpenCitadel.Bhop.Core\obj\**;..\OpenCitadel.Bhop.Core\bin\**" LinkBase="Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Supplied by Deadworks at runtime, so never copied next to the plugin. -->
+    <Reference Include="DeadworksManaged.Api">
+      <HintPath>$(DeadlockManagedDir)/DeadworksManaged.Api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Google.Protobuf">
+      <HintPath>$(DeadlockManagedDir)/Google.Protobuf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true'">
+    <ItemGroup>
+      <DeployFiles Include="$(OutputPath)OpenCitadel.Bhop.dll;$(OutputPath)OpenCitadel.Bhop.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DeployFiles)" DestinationFolder="$(DeadlockManagedDir)/plugins" SkipUnchangedFiles="false" Retries="0" ContinueOnError="WarnAndContinue" />
+  </Target>
+
+</Project>

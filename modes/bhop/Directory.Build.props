@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Version>0.1.0</Version>
+    <Authors>OpenCitadel</Authors>
+    <Copyright>MIT</Copyright>
+    <!-- Deadlock's managed folder, where Deadworks keeps DeadworksManaged.Api.dll. Override with
+         `dotnet build -p:DeadlockManagedDir=...` if Deadlock lives elsewhere. -->
+    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Program Files (x86)\Steam\steamapps\common\Deadlock\game\bin\win64\managed</DeadlockManagedDir>
+    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == '' and '$(OS)' != 'Windows_NT'">/mnt/c/Program Files (x86)/Steam/steamapps/common/Deadlock/game/bin/win64/managed</DeadlockManagedDir>
+  </PropertyGroup>
+</Project>

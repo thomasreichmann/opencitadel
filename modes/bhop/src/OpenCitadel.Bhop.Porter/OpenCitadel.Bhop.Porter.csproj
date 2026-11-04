@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>OpenCitadel.Bhop.Porter</RootNamespace>
+    <AssemblyName>citadel-port</AssemblyName>
+    <Description>Ports Counter-Strike: Source bunny-hop maps to Deadlock: BSP to Hammer map, compiled map VPK and bhop map data.</Description>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenCitadel.Bhop.Core\OpenCitadel.Bhop.Core.csproj" />
+    <!-- Datamodel.NET: reads and writes Valve's DMX documents (.vmap). MIT. -->
+    <PackageReference Include="KeyValues2" Version="2.0.0-rc2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenCitadel.Bhop.Core.Tests" />
+    <!-- `citadel-port sdk` builds the compiler launcher from this when Visual Studio is installed. -->
+    <EmbeddedResource Include="..\..\native\rclaunch.c" LogicalName="rclaunch.c" />
+  </ItemGroup>
+
+</Project>

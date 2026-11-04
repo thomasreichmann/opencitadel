@@ -31,3 +31,19 @@ jobs:
         run: pnpm test
       - name: End-to-end (master, host with the fake game, registry, CI publishing, browser)
         run: node scripts/e2e.mjs
+
+  bhop:
+    # The bhop mode's movement, collision, map format and porter. The Deadworks plugin itself needs
+    # DeadworksManaged.Api.dll from a Deadlock install, so CI builds and tests everything else.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Unit tests
+        working-directory: modes/bhop
+        run: dotnet test tests/OpenCitadel.Bhop.Core.Tests

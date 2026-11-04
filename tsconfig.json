@@ -27,6 +27,9 @@
     },
     {
       "path": "plugins/discord-webhook"
+    },
+    {
+      "path": "plugins/bhop-records"
     }
   ]
 }

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenCitadel.Bhop.Core/OpenCitadel.Bhop.Core.csproj" />
+    <Project Path="src/OpenCitadel.Bhop.Plugin/OpenCitadel.Bhop.Plugin.csproj" />
+    <Project Path="src/OpenCitadel.Bhop.Porter/OpenCitadel.Bhop.Porter.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenCitadel.Bhop.Core.Tests/OpenCitadel.Bhop.Core.Tests.csproj" />
+  </Folder>
+</Solution>

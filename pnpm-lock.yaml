@@ -54,6 +54,12 @@ importers:
 
   packages/protocol: {}
 
+  plugins/bhop-records:
+    dependencies:
+      '@opencitadel/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/discord-webhook:
     dependencies:
       '@opencitadel/plugin-sdk':

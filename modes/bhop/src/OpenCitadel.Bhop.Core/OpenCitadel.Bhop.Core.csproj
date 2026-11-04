@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenCitadel.Bhop</RootNamespace>
+    <AssemblyName>OpenCitadel.Bhop.Core</AssemblyName>
+    <Description>Counter-Strike: Source player movement, Source BSP brush collision and the bhop map format, with no game dependencies.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenCitadel.Bhop.Core.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -28,6 +28,11 @@ framework, and with vanilla `deadlock.exe -dedicated` servers.
     sandbox with no file, process or network access beyond what its permissions allow.
 * **Player tools.** `citadel-browser` lists servers, syncs and verifies the content a server needs,
   and launches Deadlock into it.
+* **Bhop mode (showcase).** [`modes/bhop`](modes/bhop) runs classic Counter-Strike: Source
+  bunny-hop maps on Deadlock with CS:S movement simulated exactly by the server. It includes a
+  porter that turns a CS:S BSP into a compiled Deadlock map, with its original collision,
+  teleports and bhop blocks. Timer zones, records, a HUD, Discord record posts and a map
+  playlist come from the plugin system.
 
 > Deadlock has no official dedicated-server release. This project is built on how the game
 > behaves today (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#how-deadlock-servers-work-today-the-facts-this-design-rests-on)).
@@ -79,6 +84,7 @@ node packages/client/dist/cli.js join <server-id>
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: tag, then npm trusted publishing with provenance |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | What's next, in priority order, and known limitations |
 | [docs/HOTSWAP.md](docs/HOTSWAP.md) | Research: toggling client mods without restarting the game |
+| [modes/bhop/README.md](modes/bhop/README.md) | The bhop mode: exact CS:S movement, porting maps, running a bhop server |
 
 ## Repository layout
 
@@ -89,8 +95,9 @@ packages/master       citadel-master: REST API, SQLite, web browser (web/), plug
 packages/host         citadel-host: supervisor, RCON, log parsing, heartbeat, plugin runtime
 packages/plugin-sdk   types + definePlugin() for host plugins
 packages/client       citadel-browser: CLI, local web UI, content sync, join
-plugins/              example host plugins (welcome, map-rotation, discord-webhook)
+plugins/              host plugins (welcome, map-rotation, discord-webhook, bhop-records)
 bridge/deadworks      OpenCitadel.Bridge: Deadworks plugin that streams game events to the host
+modes/bhop            CS:S bhop mode: movement core, Deadworks plugin, BSP map porter (C#)
 ```
 
 ## License

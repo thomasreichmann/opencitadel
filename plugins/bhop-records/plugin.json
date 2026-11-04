@@ -1,0 +1,19 @@
+{
+  "id": "bhop-records",
+  "name": "Bhop Records",
+  "version": "0.1.0",
+  "kind": "host",
+  "description": "Leaderboards for the OpenCitadel bhop mode: keeps every map's best times, announces records in game and on Discord, and shows the current map's record in the server listing. Pairs with the bhop Deadworks plugin and map-rotation.",
+  "author": "OpenCitadel",
+  "license": "MIT",
+  "tags": ["bhop", "movement", "records", "discord"],
+  "main": "dist/index.js",
+  "engines": { "opencitadel": "^0.1.0" },
+  "dependencies": { "bhop": "^0.1.0" },
+  "permissions": ["server.chat", "listing.write", "storage", "network"],
+  "config": {
+    "announce": { "type": "string", "default": "records", "description": "What to announce in chat: records (map records only), pbs (map records and personal bests) or none." },
+    "webhookUrl": { "type": "string", "default": "", "secret": true, "description": "Discord webhook URL for map records. Empty turns Discord posts off." },
+    "leaderboardSize": { "type": "integer", "default": 100, "description": "How many times to keep per map and style." }
+  }
+}
