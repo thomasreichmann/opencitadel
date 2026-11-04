@@ -145,6 +145,8 @@ function main(): void {
   };
 
   const unquote = (s: string) => s.trim().replace(/^"(.*)"$/, '$1');
+  /** Set once the fake bridge is connected: sends a message as the bridge plugin would. */
+  let bridgeSend: ((m: object) => void) | undefined;
 
   const run = (command: string): string => {
     const [word = '', ...rest] = command.trim().split(/\s+/);
@@ -177,6 +179,12 @@ function main(): void {
         return 'Shutting down';
       case 'echo':
         return arg;
+      // The bhop mode's course switch: the Deadlock map stays, the bridge reports the course (dw_ocmap).
+      case 'dw_bhopmap':
+        if (!rest[0]) return 'usage: dw_bhopmap <map>';
+        log(`[OpenCitadel.Bhop] course ${rest[0]} on ${map}`);
+        bridgeSend?.({ type: 'event', name: 'map.changed', data: { map: rest[0], base: map } });
+        return '';
       case '_crash':
         setTimeout(() => process.exit(1), 10);
         return '';
@@ -292,6 +300,7 @@ function main(): void {
     const bobData = () => ({ slot: bob.slot, name: bob.name, steamId64: bob.steamId64, team: bob.team, hero: bob.hero });
     const sock = connect(Number(portText), host!);
     const send = (m: object) => sock.write(JSON.stringify(m) + '\n');
+    bridgeSend = send;
     let inbox = '';
     sock.on('error', () => {});
     sock.on('connect', () => send({ type: 'hello', token: env.OPENCITADEL_BRIDGE_TOKEN ?? '', bridge: '0.1.0-fake', deadworks: '0.0.0-fake', map }));

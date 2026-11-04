@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { gameLayout } from '@opencitadel/gamefiles';
 import { parseHostConfig } from './config.js';
-import { CFG_NAME, buildServerArgs, buildServerCfg, cfgQuote, planLaunch } from './launch.js';
+import { CFG_NAME, buildServerArgs, buildServerCfg, cfgQuote, forwardToWindows, planLaunch } from './launch.js';
 
 test('server args follow the documented order, map last', () => {
   const config = parseHostConfig({ rcon: { password: 'pw' }, game: { port: 27020, map: 'dl_streets' } });
@@ -63,4 +63,19 @@ test('launch plan: exe, wrapper, cwd, bridge env', () => {
   assert.equal(wine.command, 'wine');
   assert.deepEqual(wine.args.slice(0, 3), ['--debug', layout.deadworksExe, '-dedicated']);
   assert.deepEqual(wine.env, { OPENCITADEL_BRIDGE: '127.0.0.1:27100', OPENCITADEL_BRIDGE_TOKEN: 't0k' });
+});
+
+test('launch plan: under WSL the bridge variables are forwarded to the Windows process', () => {
+  const layout = gameLayout('/mnt/c/Deadlock');
+  const config = parseHostConfig({ game: { executable: 'deadworks' } });
+  const plan = planLaunch(config, layout, { port: 27100, token: 't0k' }, () => true);
+  assert.equal(plan.env.OPENCITADEL_BRIDGE, '127.0.0.1:27100');
+  assert.deepEqual(plan.env.WSLENV?.split(':').slice(-2), ['OPENCITADEL_BRIDGE', 'OPENCITADEL_BRIDGE_TOKEN']);
+  // Without a bridge there is nothing to forward.
+  assert.deepEqual(planLaunch(config, layout, undefined, () => true).env, {});
+
+  // Existing entries (and their flags) are kept; names already listed are not repeated.
+  assert.deepEqual(forwardToWindows({ A: '1', B: '2' }, 'USERPROFILE/p:A'), { A: '1', B: '2', WSLENV: 'USERPROFILE/p:A:B' });
+  assert.deepEqual(forwardToWindows({ A: '1' }, 'A/u'), { A: '1' });
+  assert.deepEqual(forwardToWindows({ A: '1' }, ''), { A: '1', WSLENV: 'A' });
 });

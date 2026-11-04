@@ -100,7 +100,10 @@ map.
 **Map changes** restart the server on the new map, because `changelevel` crashes a stock server
 (build 6796). Everyone is disconnected, and an anonymous server comes back with a new Steam ID,
 which the listing picks up. If your server handles `changelevel` (a later game build, or
-Deadworks), set `game.mapChange: "changelevel"`.
+Deadworks), set `game.mapChange: "changelevel"`. A game mode that draws its own maps into a stock
+one (the bhop mode's zero-install courses) uses `"mapChange": "command"` with `game.mapCommand`,
+e.g. `"dw_bhopmap {map}"`: the Deadlock map stays `game.map`, the mode switches its map in place,
+and after a restart the host asks for the last map again.
 
 ### How players reach you
 

@@ -85,11 +85,30 @@ test('scheduled rotation announces a minute ahead', async () => {
   await plugin.setup(f.ctx);
   f.state.players.push(...players(2));
   const t0 = Date.now();
+  await f.emit('tick', { now: t0 + 10 * 60_000 });
+  // !nextmap tells players when, and how to change sooner.
+  assert.deepEqual(await f.run('nextmap', f.state.players[0]), ['Next map: dl_hideout in 20 min. Type !rtv to vote to change now.']);
   await f.emit('tick', { now: t0 + 28 * 60_000 });
   assert.deepEqual(f.said, []);
   await f.emit('tick', { now: t0 + 29 * 60_000 });
   assert.deepEqual(f.said, ['Next map: dl_hideout in 1 minute.']);
   await f.emit('tick', { now: t0 + 30 * 60_000 });
+  assert.deepEqual(f.changes, ['dl_hideout']);
+});
+
+test('the first player into an empty server gets the whole interval', async () => {
+  const f = fakeContext({ intervalMinutes: 20, emptyMinutes: 0 });
+  await plugin.setup(f.ctx);
+  const t0 = Date.now();
+  await f.emit('tick', { now: t0 });
+  await f.emit('tick', { now: t0 + 90 * 60_000 }); // empty long past the interval
+  f.state.players.push(...players(1));
+  await f.emit('tick', { now: t0 + 90 * 60_000 + 1000 });
+  assert.deepEqual(f.changes, [], 'no change as they load in');
+  assert.deepEqual(f.said, []);
+  await f.emit('tick', { now: t0 + 109 * 60_000 + 1000 });
+  assert.deepEqual(f.said, ['Next map: dl_hideout in 1 minute.']);
+  await f.emit('tick', { now: t0 + 110 * 60_000 + 1000 });
   assert.deepEqual(f.changes, ['dl_hideout']);
 });
 
@@ -114,7 +133,7 @@ test('!rtv needs the configured share of players; votes reset on map change', as
 test('!map and !nextmap', async () => {
   const f = fakeContext();
   await plugin.setup(f.ctx);
-  assert.deepEqual(await f.run('nextmap', undefined), ['Next map: dl_hideout']);
+  assert.deepEqual(await f.run('nextmap', undefined), ['Next map: dl_hideout. Type !rtv to vote to change now.']);
   assert.deepEqual(await f.run('map', undefined, []), ['Usage: !map <name>']);
   assert.deepEqual(await f.run('map', undefined, ['bad;name']), ['Usage: !map <name>']);
   await f.run('map', undefined, ['street_test'], true);

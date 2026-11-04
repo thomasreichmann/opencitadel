@@ -324,7 +324,8 @@ server.json                 config (mode 0600: holds the server token and RCON p
     "extraArgs": [],
     "patchGameinfo": true,        // re-apply the P2P edits before every start
     "logSource": "stdout",        // "stdout" | "condebug" (tail citadel/console.log)
-    "mapChange": "restart"        // "restart" (relaunch on the new map) | "changelevel"
+    "mapChange": "restart",       // "restart" (relaunch on the new map) | "changelevel" | "command"
+    "mapCommand": "changelevel {map}" // what "command" runs, e.g. "dw_bhopmap {map}" for drawn courses
   },
   "rcon": { "enabled": true, "password": "<generated>" },
   "publicAddress": null,          // "203.0.113.5:27015" to advertise a direct address; null = SDR only

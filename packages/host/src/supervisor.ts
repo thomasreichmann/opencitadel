@@ -43,6 +43,8 @@ export interface SupervisorTimings {
   backoffBaseMs: number;
   /** Uptime after which the crash counter resets. */
   uptimeResetMs: number;
+  /** mapChange "command": wait after a relaunch before asking for the map again (plugins load first). */
+  courseResendMs: number;
   tickMs: number;
   stateWriteMs: number;
   logPollMs: number;
@@ -54,6 +56,7 @@ const DEFAULT_TIMINGS: SupervisorTimings = {
   stopTimeoutMs: 20_000,
   backoffBaseMs: 5000,
   uptimeResetMs: 10 * 60_000,
+  courseResendMs: 3000,
   tickMs: 1000,
   stateWriteMs: 2000,
   logPollMs: 250,
@@ -138,6 +141,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   private restartTimer?: NodeJS.Timeout;
   /** Set by changeMap(): the map every later launch starts on, crash restarts included. */
   private launchMap?: string;
+  /** The Deadlock map the server is on, as the engine names it. */
+  private engineMap?: string;
+  /** A game mode's own map drawn into `engineMap` (see `dw_ocmap`), which players are really on. */
+  private course?: string;
+  /** mapChange "command": the last map asked for, asked for again after a relaunch. */
+  private courseRequest?: string;
+  private courseTimer?: NodeJS.Timeout;
   private matchEndTimer?: NodeJS.Timeout;
   private rconTimer?: NodeJS.Timeout;
   private statusTimer?: NodeJS.Timeout;
@@ -342,7 +352,9 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     if (this.rconTimer) clearTimeout(this.rconTimer);
     if (this.statusTimer) clearInterval(this.statusTimer);
     if (this.matchEndTimer) clearTimeout(this.matchEndTimer);
-    this.rconTimer = this.statusTimer = this.matchEndTimer = undefined;
+    if (this.courseTimer) clearTimeout(this.courseTimer);
+    this.rconTimer = this.statusTimer = this.matchEndTimer = this.courseTimer = undefined;
+    this.engineMap = this.course = undefined;
     const rcon = this.rcon;
     this.rcon = undefined;
     rcon?.close();
@@ -472,6 +484,14 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    * the map it starts on changes.
    */
   async changeMap(map: string): Promise<void> {
+    if (this.config.game.mapChange === 'command') {
+      // The Deadlock map stays (and later launches start on game.map); a game mode switches its own.
+      this.courseRequest = map;
+      await this.services.command(this.mapCommand(map));
+      // The bridge reports the switch (dw_ocmap); without it, take the command at its word.
+      if (!this.bus.isLive('bridge')) this.reportMap('rcon', map, this.engineMap ?? this.config.game.map);
+      return;
+    }
     this.launchMap = map;
     if (this.config.game.mapChange === 'changelevel') {
       await this.services.command(`changelevel ${map}`);
@@ -482,6 +502,41 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       return;
     }
     await this.restart(`on map ${map}`);
+  }
+
+  private mapCommand(map: string): string {
+    return this.config.game.mapCommand.split('{map}').join(map);
+  }
+
+  /**
+   * Publishes the map players are on. With `base`, `map` is a game mode's own map drawn into the
+   * Deadlock map `base` (bhop courses on a stock map): while it lasts, the engine naming `base`
+   * again (the log, RCON status) changes nothing, and naming any other map ends it.
+   */
+  private reportMap(source: EventSource, map: string, base?: string): void {
+    if (base && base !== map) {
+      this.course = map;
+      this.engineMap = base;
+    } else {
+      if (this.course && map === this.engineMap) return;
+      this.course = undefined;
+      this.engineMap = map;
+    }
+    this.bus.publish(source, 'map.changed', { map });
+  }
+
+  /** mapChange "command": a relaunch starts on game.map again; put players back on the map they were on. */
+  private resendCourse(): void {
+    const map = this.courseRequest;
+    if (this.config.game.mapChange !== 'command' || !map) return;
+    if (this.courseTimer) clearTimeout(this.courseTimer);
+    const seq = this.launchSeq;
+    this.courseTimer = setTimeout(() => {
+      this.courseTimer = undefined;
+      if (seq !== this.launchSeq || this.stopping || this.course === map) return;
+      this.log.info(`Back to ${map}.`);
+      this.changeMap(map).catch((err: Error) => this.log.warn(`Could not switch back to ${map}: ${err.message}`));
+    }, this.timings.courseResendMs);
   }
 
   /**
@@ -560,8 +615,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
           this.setSteamId(ev.steamId, 'log');
           break;
         case 'map':
-          this.bus.publish('log', 'map.changed', { map: ev.map });
-          this.bus.publish('log', 'server.ready', { map: ev.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
+          this.reportMap('log', ev.map);
+          this.bus.publish('log', 'server.ready', { map: this.course ?? ev.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
           break;
         case 'chat':
           this.bus.publish('log', 'chat.message', {
@@ -648,8 +703,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     if (info.maxPlayers) this.state.maxPlayers = info.maxPlayers;
     if (info.steamId) this.setSteamId(info.steamId, 'rcon');
     if (info.map) {
-      this.bus.publish('rcon', 'map.changed', { map: info.map });
-      this.bus.publish('rcon', 'server.ready', { map: info.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
+      this.reportMap('rcon', info.map);
+      this.bus.publish('rcon', 'server.ready', { map: this.course ?? info.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
     }
     this.bus.reconcile('rcon', info.players.map(statusPlayer));
     this.stateWriter.markDirty();
@@ -661,7 +716,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       this.state.sources.bridge = true;
       this.markRunning();
       if (hello.map) {
-        this.bus.publish('bridge', 'map.changed', { map: hello.map });
+        this.reportMap('bridge', hello.map, hello.base);
         this.bus.publish('bridge', 'server.ready', { map: hello.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
       }
       bridge
@@ -684,14 +739,15 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
 
   private onBridgeEvent(name: string, data: Record<string, unknown>): void {
     const map = str(data.map, 64);
+    const base = str(data.base, 64);
     switch (name) {
       case 'server.ready':
-        if (map) this.bus.publish('bridge', 'map.changed', { map });
+        if (map) this.reportMap('bridge', map, base);
         // Deadworks reports an empty map name until the first map has started.
-        this.bus.publish('bridge', 'server.ready', { map: map || this.bus.currentMap() || this.config.game.map, ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
+        this.bus.publish('bridge', 'server.ready', { map: this.course ?? (map || this.bus.currentMap() || this.config.game.map), ...(this.state.steamId ? { steamId: this.state.steamId } : {}) });
         break;
       case 'map.changed':
-        if (map) this.bus.publish('bridge', 'map.changed', { map });
+        if (map) this.reportMap('bridge', map, base);
         break;
       case 'player.connected':
         this.bus.publish('bridge', 'player.connected', { player: bridgePlayer(data) });
@@ -728,12 +784,17 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       case 'player.disconnected':
         this.log.info(`${(p.player as Player).name} left${p.reason ? ` (${String(p.reason)})` : ''}.`);
         break;
+      case 'chat.message':
+        // Like a game server's own console: operators see what players say, and whether chat arrives at all.
+        this.log.info(`${p.teamOnly ? '(team) ' : ''}${(p.player as Player).name}: ${String(p.message)}`);
+        break;
       case 'map.changed':
         this.state.map = String(p.map);
         this.log.info(`Map: ${String(p.map)}`);
         break;
       case 'server.ready':
         this.markRunning();
+        this.resendCourse();
         break;
     }
     this.stateWriter.markDirty();

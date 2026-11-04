@@ -67,6 +67,12 @@ export default definePlugin<RotationConfig>({
         }
         return;
       }
+      // The interval counts time with players on: someone joining an empty server gets the whole of
+      // it, rather than the map changing under them as they load in.
+      if (emptySince !== undefined) {
+        lastChange = t;
+        announced = false;
+      }
       emptySince = undefined;
       rotatedWhileEmpty = false;
       const interval = ctx.config.intervalMinutes * MINUTE;
@@ -98,10 +104,15 @@ export default definePlugin<RotationConfig>({
     });
 
     ctx.commands.register('nextmap', {
-      description: 'Show the next map in the rotation',
+      description: 'Show the next map in the rotation and when it comes',
       handler: (cmd) => {
         const next = upcoming();
-        return cmd.reply(next ? `Next map: ${next}` : 'There is no other map in the rotation.');
+        if (!next) return cmd.reply('There is no other map in the rotation.');
+        // Players read !nextmap as "change the map"; say when it happens and how to make it happen now.
+        const interval = ctx.config.intervalMinutes * MINUTE;
+        const left = Math.max(1, Math.ceil((lastChange + interval - now) / MINUTE));
+        const when = interval > 0 && humans().length > 0 ? ` in ${left} min` : '';
+        return cmd.reply(`Next map: ${next}${when}. Type !rtv to vote to change now.`);
       },
     });
 

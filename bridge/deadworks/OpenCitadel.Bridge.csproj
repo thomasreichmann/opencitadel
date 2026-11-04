@@ -10,7 +10,9 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- Deadlock's managed folder, where Deadworks keeps DeadworksManaged.Api.dll. Override with
          `dotnet build -p:DeadlockManagedDir=...` if Deadlock lives elsewhere. -->
-    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Deadlock\game\bin\win64\managed</DeadlockManagedDir>
+    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == '' and '$(OS)' == 'Windows_NT'">C:\Program Files (x86)\Steam\steamapps\common\Deadlock\game\bin\win64\managed</DeadlockManagedDir>
+    <!-- WSL: the same install through the Windows drive mount. -->
+    <DeadlockManagedDir Condition="'$(DeadlockManagedDir)' == '' and '$(OS)' != 'Windows_NT'">/mnt/c/Program Files (x86)/Steam/steamapps/common/Deadlock/game/bin/win64/managed</DeadlockManagedDir>
     <!-- Set to true to copy the built plugin into $(DeadlockManagedDir)\plugins after each build. -->
     <DeployToGame Condition="'$(DeployToGame)' == ''">false</DeployToGame>
   </PropertyGroup>

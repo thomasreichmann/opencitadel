@@ -37,9 +37,14 @@ It also showed that a stock server doesn't answer A2S (see the limitations below
 * **A remote player.** Every client so far ran on the server's machine.
 * **Chat on a stock server.** No player chat appeared in the server output during the test. If
   a stock server never prints chat, chat commands need the bridge.
-* **`map <name>`.** It is untested; `changelevel` crashes the server.
-* **Deadworks bridge.** `say`, `tell`, `kick`, `command` and `players` inside a live server
-  (`bridge/deadworks`), and plugins receiving real player, chat and map events through it.
+* **`map <name>`.** It is untested; `changelevel` crashes a stock server. Under Deadworks
+  (build 6842) `changelevel` works, so `game.mapChange: "changelevel"` is safe there.
+* **Deadworks bridge.** On 2026-11-03 it connected inside a live Deadworks server (build 6842),
+  ran `command` requests (`changelevel` from `map-rotation`) and delivered plugin events
+  (`ocemit` → `bhop-records`), and stayed up across a map change; its `say` reached a player.
+  On 2026-11-04 it ran a public server (build 6848) for a day, and real players' join, leave
+  and chat events arrived through it, along with course changes (`dw_ocmap`). Still untested:
+  `tell`, `kick` and `players`.
 
 **Done when.**
 * A client on another network joins from `citadel-browser`.

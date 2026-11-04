@@ -44,9 +44,15 @@ export const hostConfigValidator = v.object({
       logSource: v.withDefault(v.literal(['condebug', 'stdout'] as const), 'stdout'),
       /**
        * How a plugin's map change happens. `restart` relaunches the server on the new map;
-       * `changelevel` asks the running server, which crashes a stock server (build 6796).
+       * `changelevel` asks the running server, which crashes a stock server (build 6796) but
+       * works under Deadworks (build 6842). `command` runs `mapCommand` instead and leaves the
+       * Deadlock map alone: for game modes that draw their own maps into a stock one, so players
+       * need nothing installed (the bhop mode's `dw_bhopmap {map}`). The server then always
+       * launches on `map`, and the last map asked for is asked for again after a restart.
        */
-      mapChange: v.withDefault(v.literal(['restart', 'changelevel'] as const), 'restart'),
+      mapChange: v.withDefault(v.literal(['restart', 'changelevel', 'command'] as const), 'restart'),
+      /** The console command `mapChange: "command"` runs; `{map}` is replaced by the map's name. */
+      mapCommand: v.withDefault(v.string({ min: 1, max: 200, pattern: /\{map\}/ }), 'changelevel {map}'),
     }),
   ),
   rcon: section(

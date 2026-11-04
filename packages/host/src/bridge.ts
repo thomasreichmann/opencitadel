@@ -16,6 +16,8 @@ export interface BridgeHello {
   bridge?: string;
   deadworks?: string;
   map?: string;
+  /** Set when `map` is a game mode's own map drawn into this Deadlock map (see `dw_ocmap`). */
+  base?: string;
 }
 
 export interface BridgeOptions {
@@ -189,6 +191,7 @@ export class BridgeServer extends EventEmitter<BridgeEvents> {
         ...(typeof msg.bridge === 'string' ? { bridge: msg.bridge } : {}),
         ...(typeof msg.deadworks === 'string' ? { deadworks: msg.deadworks } : {}),
         ...(typeof msg.map === 'string' ? { map: msg.map } : {}),
+        ...(typeof msg.base === 'string' ? { base: msg.base } : {}),
       };
       this.opts.log.info(`In-game bridge connected (bridge ${hello.bridge ?? '?'}, deadworks ${hello.deadworks ?? '?'}).`);
       this.emit('connected', hello);

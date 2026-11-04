@@ -8,8 +8,20 @@
 import { join } from 'node:path';
 import type { GameLayout } from '@opencitadel/gamefiles';
 import type { HostConfig } from './config.js';
+import { runsOnWindowsSide } from './winproc.js';
 
 export const CFG_NAME = 'opencitadel_server.cfg';
+
+/**
+ * Under WSL a Windows program receives only the variables that WSLENV names. Without this the
+ * bridge address and token never reach deadworks.exe, and the bridge stays idle.
+ */
+export function forwardToWindows(env: Record<string, string>, wslenv = process.env.WSLENV ?? ''): Record<string, string> {
+  const listed = wslenv.split(':').filter(Boolean);
+  const names = new Set(listed.map((entry) => entry.split('/')[0]));
+  const added = Object.keys(env).filter((name) => !names.has(name));
+  return added.length ? { ...env, WSLENV: [...listed, ...added].join(':') } : env;
+}
 
 export interface LaunchPlan {
   command: string;
@@ -75,17 +87,24 @@ export function buildServerArgs(config: HostConfig): string[] {
   return args;
 }
 
-export function planLaunch(config: HostConfig, layout: GameLayout, bridge?: BridgeEndpoint): LaunchPlan {
+export function planLaunch(
+  config: HostConfig,
+  layout: GameLayout,
+  bridge?: BridgeEndpoint,
+  windowsSide: (command: string) => boolean = runsOnWindowsSide,
+): LaunchPlan {
   const exe = config.game.executable === 'deadworks' ? layout.deadworksExe : layout.exe;
   const flags = buildServerArgs(config);
   const [wrapperCmd, ...wrapperArgs] = config.game.wrapper;
-  const env: Record<string, string> = {};
+  const command = wrapperCmd ?? exe;
+  let env: Record<string, string> = {};
   if (bridge) {
     env.OPENCITADEL_BRIDGE = `127.0.0.1:${bridge.port}`;
     env.OPENCITADEL_BRIDGE_TOKEN = bridge.token;
   }
+  if (windowsSide(command)) env = forwardToWindows(env);
   return {
-    command: wrapperCmd ?? exe,
+    command,
     args: wrapperCmd ? [...wrapperArgs, exe, ...flags] : flags,
     cwd: layout.binDir,
     env,

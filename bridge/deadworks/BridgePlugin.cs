@@ -61,8 +61,34 @@ public sealed class BridgePlugin : DeadworksPluginBase {
 
 	public override void OnStartupServer() {
 		var map = Server.MapName;
+		_course = null; // a new Deadlock map: whatever ran on the old one is gone
 		Send(Event("map.changed", new JsonObject { ["map"] = map }));
 		Send(Event("server.ready", new JsonObject { ["map"] = map }));
+	}
+
+	/// <summary>The map players are really on, when a game mode draws its own into the Deadlock map.</summary>
+	private volatile string? _course;
+
+	/// <summary>
+	/// For game modes that run maps of their own on top of a Deadlock map, such as bhop courses drawn
+	/// into a stock map so players need nothing installed: <c>dw_ocmap &lt;name&gt;</c> tells citadel-host
+	/// which map players are on, for listings and map rotation. It holds until the Deadlock map
+	/// changes; <c>dw_ocmap off</c> clears it.
+	/// </summary>
+	[Command("ocmap", ConsoleOnly = true, ServerOnly = true, Hidden = true,
+		Description = "Report the map players are on when a game mode draws its own: ocmap <name>|off")]
+	public void CmdMap(string name) {
+		if (name is "off" or "none") {
+			_course = null;
+			Send(Event("map.changed", new JsonObject { ["map"] = Server.MapName }));
+			return;
+		}
+		if (name.Length is 0 or > 64 || !name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) {
+			Console.WriteLine($"[OpenCitadel.Bridge] ocmap: bad map name \"{name}\"");
+			return;
+		}
+		_course = name;
+		Send(Event("map.changed", new JsonObject { ["map"] = name, ["base"] = Server.MapName }));
 	}
 
 	public override void OnClientFullConnect(ClientFullConnectEvent args) {
@@ -109,6 +135,35 @@ public sealed class BridgePlugin : DeadworksPluginBase {
 		}
 		Send(Event("game.event", new JsonObject { ["name"] = "player_death", ["data"] = data }));
 		return HookResult.Continue;
+	}
+
+	/// <summary>
+	/// Lets other Deadworks plugins publish events to citadel-host without referencing this one:
+	/// <c>Server.ExecuteCommand("dw_ocemit &lt;name&gt; &lt;base64 of a JSON object&gt;")</c> arrives in
+	/// host plugins as <c>game.event</c> <c>{ name, data }</c>. Base64 keeps the JSON intact through
+	/// the console's tokenizer. Server-only, so players can't forge events.
+	/// </summary>
+	[Command("ocemit", ConsoleOnly = true, ServerOnly = true, Hidden = true,
+		Description = "Publish a game event to citadel-host: ocemit <name> <base64 JSON object>")]
+	public void CmdEmit(string name, string payloadBase64) {
+		if (name.Length is 0 or > 64 || !name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')) {
+			Console.WriteLine($"[OpenCitadel.Bridge] ocemit: bad event name \"{name}\"");
+			return;
+		}
+		JsonNode? data;
+		try {
+			var bytes = Convert.FromBase64String(payloadBase64);
+			if (bytes.Length > 16 * 1024) throw new FormatException("payload over 16 KiB");
+			data = JsonNode.Parse(bytes);
+		} catch (Exception ex) when (ex is FormatException or JsonException) {
+			Console.WriteLine($"[OpenCitadel.Bridge] ocemit {name}: bad payload ({ex.Message})");
+			return;
+		}
+		if (data is not JsonObject obj) {
+			Console.WriteLine($"[OpenCitadel.Bridge] ocemit {name}: payload must be a JSON object");
+			return;
+		}
+		Send(Event("game.event", new JsonObject { ["name"] = name, ["data"] = obj }));
 	}
 
 	private static JsonObject PlayerJson(CBasePlayerController controller) {
@@ -217,13 +272,15 @@ public sealed class BridgePlugin : DeadworksPluginBase {
 					SingleReader = true,
 				});
 				// The hello must be the first line on the wire.
-				outbox.Writer.TryWrite(new JsonObject {
+				var hello = new JsonObject {
 					["type"] = "hello",
 					["token"] = token,
 					["bridge"] = BridgeVersion,
 					["deadworks"] = Deadworks.Version,
-					["map"] = Server.MapName,
-				}.ToJsonString());
+					["map"] = _course ?? Server.MapName,
+				};
+				if (_course != null) hello["base"] = Server.MapName;
+				outbox.Writer.TryWrite(hello.ToJsonString());
 				Interlocked.Exchange(ref _lastSeenTicks, Environment.TickCount64);
 
 				var writer = WriteLoopAsync(stream, outbox.Reader, session.Token);

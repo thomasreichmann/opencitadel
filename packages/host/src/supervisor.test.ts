@@ -78,21 +78,22 @@ const until = async (what: string, cond: () => boolean, ms = 30_000) => {
   }
 };
 
-const TIMINGS = { rconRetryMs: 100, statusPollMs: 150, heartbeatMs: 100, stopTimeoutMs: 3000, backoffBaseMs: 150, tickMs: 100, stateWriteMs: 50, logPollMs: 25 };
+const TIMINGS = { rconRetryMs: 100, statusPollMs: 150, heartbeatMs: 100, stopTimeoutMs: 3000, backoffBaseMs: 150, tickMs: 100, stateWriteMs: 50, logPollMs: 25, courseResendMs: 200 };
 
 async function setup(wrapperExtra: string[] = [], overrides: Record<string, unknown> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'oc-game-'));
   const serverDir = await mkdtemp(join(tmpdir(), 'oc-server-'));
   const layout = await createFakeInstall(root);
   const master = await fakeMaster();
+  const { game, ...rest } = overrides;
   const config = parseHostConfig({
     name: 'E2E Server',
-    game: { path: root, wrapper: ['node', FAKE_GAME_SCRIPT, ...wrapperExtra], port: await freePort() },
+    game: { path: root, wrapper: ['node', FAKE_GAME_SCRIPT, ...wrapperExtra], port: await freePort(), ...(game as object | undefined) },
     rcon: { password: 'rcon-pw' },
     master: { url: master.url, serverId: 'srv1', token: 'ocs_t' },
     bridge: { enabled: true, port: await freePort() },
     privacy: { showPlayerNames: true },
-    ...overrides,
+    ...rest,
   });
   const host = new RecordingHost();
   const sup = new Supervisor({ serverDir, config, gameRoot: root, createPluginHost: () => host, timings: TIMINGS });
@@ -198,6 +199,29 @@ test('a finished match gets a fresh server, on the map a plugin picked', async (
 
     assert.ok(host.of('console.line').length > 0);
     assert.ok(!host.of('console.line').some((e) => e.line.includes('GetNumberOfConsoleInputEvents')), 'per-frame stdin noise is dropped');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('mapChange "command" switches a game mode\'s own map in place, and keeps it across a crash', async () => {
+  const { host, sup, cleanup } = await setup(['--fake-bridge'], { game: { mapChange: 'command', mapCommand: 'dw_bhopmap {map}' } });
+  try {
+    await sup.start();
+    await until('bridge connected', () => sup.getState().sources.bridge && sup.getState().map === 'dl_midtown');
+    await sup.changeMap('bhop_eazy');
+    await until('on the course', () => sup.getState().map === 'bhop_eazy');
+    // RCON status keeps naming the Deadlock map underneath; that doesn't undo the course.
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(sup.getState().map, 'bhop_eazy');
+    assert.deepEqual(host.of('map.changed').map((e) => e.map), ['dl_midtown', 'bhop_eazy']);
+    assert.equal(host.of('server.starting').length, 1, 'no restart for a course switch');
+
+    // A crash relaunches on game.map, and the course is asked for again.
+    await sup.services.command('_crash').catch(() => {});
+    await until('relaunch', () => host.of('server.starting').length === 2);
+    await until('back on the course', () => host.of('map.changed').filter((e) => e.map === 'bhop_eazy').length === 2);
+    assert.equal(sup.getState().map, 'bhop_eazy');
   } finally {
     await cleanup();
   }
