@@ -3,6 +3,8 @@ import { definePlugin, type Player } from '@opencitadel/plugin-sdk';
 export interface RotationConfig {
   maps: string[];
   emptyMinutes: number;
+  /** Where an empty server goes after emptyMinutes, instead of the next map: the map newcomers should start on. */
+  emptyMap?: string;
   intervalMinutes: number;
   rtvRatio: number;
   afterMatch: boolean;
@@ -26,6 +28,11 @@ export default definePlugin<RotationConfig>({
       ctx.log.warn(`Ignoring invalid map name "${m}"`);
       return false;
     });
+    let emptyMap = ctx.config.emptyMap || undefined;
+    if (emptyMap && !MAP_NAME.test(emptyMap)) {
+      ctx.log.warn(`Ignoring invalid emptyMap "${emptyMap}"`);
+      emptyMap = undefined;
+    }
     const votes = new Set<string>();
     let now = Date.now();
     let emptySince: number | undefined;
@@ -61,9 +68,10 @@ export default definePlugin<RotationConfig>({
       const next = upcoming();
       if (humans().length === 0) {
         emptySince ??= t;
-        if (next && !rotatedWhileEmpty && ctx.config.emptyMinutes > 0 && t - emptySince >= ctx.config.emptyMinutes * MINUTE) {
+        const target = emptyMap ? (emptyMap !== ctx.server.state.map ? emptyMap : undefined) : next;
+        if (target && !rotatedWhileEmpty && ctx.config.emptyMinutes > 0 && t - emptySince >= ctx.config.emptyMinutes * MINUTE) {
           rotatedWhileEmpty = true;
-          await changeTo(next, `empty for ${ctx.config.emptyMinutes} min`);
+          await changeTo(target, `empty for ${ctx.config.emptyMinutes} min`);
         }
         return;
       }

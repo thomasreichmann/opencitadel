@@ -80,6 +80,32 @@ test('rotates once after the server has been empty long enough', async () => {
   assert.equal(f.metadata.get('nextMap'), 'street_test');
 });
 
+test('with emptyMap, an empty server goes back to it rather than on', async () => {
+  const f = fakeContext({ emptyMap: 'street_test' });
+  await plugin.setup(f.ctx);
+  const t0 = 1_000_000;
+  await f.emit('tick', { now: t0 });
+  await f.emit('tick', { now: t0 + 10 * 60_000 });
+  assert.deepEqual(f.changes, ['street_test']);
+  assert.equal(f.store.get('index'), 2, 'the rotation carries on from it');
+  // Players come and go: back to it again, and never away from it.
+  f.state.players.push(...players(1));
+  await f.emit('tick', { now: t0 + 11 * 60_000 });
+  await f.run('map', undefined, ['dl_hideout'], true);
+  f.state.players.length = 0;
+  await f.emit('tick', { now: t0 + 12 * 60_000 });
+  await f.emit('tick', { now: t0 + 22 * 60_000 });
+  assert.deepEqual(f.changes, ['street_test', 'dl_hideout', 'street_test']);
+  await f.emit('tick', { now: t0 + 60 * 60_000 });
+  assert.deepEqual(f.changes, ['street_test', 'dl_hideout', 'street_test']);
+
+  const bad = fakeContext({ emptyMap: 'bad;name' });
+  await plugin.setup(bad.ctx);
+  await bad.emit('tick', { now: t0 });
+  await bad.emit('tick', { now: t0 + 10 * 60_000 });
+  assert.deepEqual(bad.changes, ['dl_hideout'], 'an invalid emptyMap is ignored');
+});
+
 test('scheduled rotation announces a minute ahead', async () => {
   const f = fakeContext({ intervalMinutes: 30 });
   await plugin.setup(f.ctx);
