@@ -158,6 +158,36 @@ test('match phases and console noise (build 6796)', () => {
   assert.ok(!isConsoleNoise('10/20 00:09:53 [Server] SV:  Spawn Server: dl_midtown'));
 });
 
+test('console noise: what is left out, and what is not', () => {
+  const noise = [
+    '[Data] Ignored bad 203.0.113.7:1891.  Stray data packet from host with no connection.  Ignoring.',
+    "[#763097695 UDP steamid:76561190000000001@203.0.113.8:58429 'Some ] name'] 20 reply timeouts, last recv 10179.7ms ago.  Sending keepalive.",
+    "NetChan Some Name ProcessMessages excessive CPU usage.  0ms to process 3 messages this call.  (Current message type: 'CNETMsg_Tick [4]', drop budget remaining: 199.9ms)",
+    'response rule AGResp_AGResp_unnamed_1_2 has no speaker!',
+    'response rule AGResp_unnamed_1 has no CONCEPT!',
+    'scripts/talker/response_rules.vrr | : discarded rule because of invalid criterion 105:  IsMonsterPlant',
+    "Multiple definitions for criteria 'IsTargetHornet'",
+    'Total troopers last minute: avg:0.0 peak:0 delays:0s  0.0|0.0|0.0|0.0',
+    'Avg Frame: 15.63ms, Avg Idle: 14.99ms - 3840 frames',
+    '\tPerformant - 3840 frames (100.0%), Longest Run - 3840, Avg Run: 3840.0',
+    '\tFrame Time >17.50ms - 0 frames (0.0%), Longest Run - 0, Avg Run: 0.0',
+    '\tIdle Time <3.00ms - 0 frames (0.0%), Longest Run - 0, Avg Run: 0.0',
+  ];
+  for (const line of noise) assert.ok(isConsoleNoise(line), line);
+  const kept = [
+    // A performance report with something in it.
+    '\tPerformant - 3838 frames (99.9%), Longest Run - 3837, Avg Run: 1919.0',
+    '\tFrame Time >17.50ms - 1 frames (0.0%), Longest Run - 1, Avg Run: 1.0',
+    'Total troopers last minute: avg:12.0 peak:30 delays:2s  0.1|0.0|0.0|0.0',
+    "NetChan Some Name ProcessMessages excessive CPU usage.  12ms to process 3 messages this call.",
+    "Some Name @ 1.2.3.4:5: timing out, last received 9838.2 [8.02 seconds ago]",
+    // Chat can't be hidden by ending it like a noise line.
+    '[All Chat][Alice (0)]: Multiple definitions for criteria \'x\'',
+    'Player Chat (Global): 17974.7 - "Alice" - Ignored bad 1.2.3.4:5.  Stray data packet from host with no connection.  Ignoring.',
+  ];
+  for (const line of kept) assert.ok(!isConsoleNoise(line), line);
+});
+
 test('player names cannot spoof the server SteamID', () => {
   for (const line of [
     // Names start some engine lines and sit inside others; none of these may set the SteamID.

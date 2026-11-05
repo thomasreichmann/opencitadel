@@ -14,7 +14,7 @@ import { checkAdvisories, createPluginHost, installedListing, runPluginCli } fro
 import { defaultHostConfig, hostPaths, loadHostConfig, parseHostConfig, saveHostConfig, type HostConfig } from './config.js';
 import { attachHostConsole } from './console.js';
 import { gameinfoStatus, patchGameinfo, resolveGameRoot, unpatchGameinfo } from './game.js';
-import { addLogSink, createLogger, fileSink } from './logger.js';
+import { addLogSink, createLogger, fileSink, gameLineWriter } from './logger.js';
 import { RconClient } from './rcon.js';
 import { isProcessAlive, readStateFile } from './state.js';
 import { Supervisor } from './supervisor.js';
@@ -133,12 +133,16 @@ async function cmdStart(dir: string, args: string[]): Promise<number> {
         : `${exe} not found.`,
     );
   }
-  addLogSink(fileSink(join(hostPaths(dir).logsDir, 'host.log')).sink);
+  const { logsDir } = hostPaths(dir);
+  const rotation = { maxBytes: config.logs.maxFileMegabytes * 1024 * 1024, keep: config.logs.keepFiles };
+  addLogSink(fileSink(join(logsDir, 'host.log'), rotation).sink);
   // Warn about installed versions with security advisories; never delays or blocks the start.
   void checkAdvisories(dir, config, createLogger('advisories'));
 
   const sup = new Supervisor({ serverDir: dir, config, gameRoot, createPluginHost, installedListing });
-  if (!values.quiet) sup.on('line', (line) => process.stdout.write(`[game] ${line}\n`));
+  const echo = values.quiet ? undefined : (line: string) => void process.stdout.write(`[game] ${line}\n`);
+  const writeGameLine = gameLineWriter(config.logs, join(logsDir, 'game.log'), rotation, echo, createLogger('logs'));
+  if (writeGameLine) sup.on('line', writeGameLine);
 
   return new Promise<number>((resolveExit) => {
     let shuttingDown = false;

@@ -299,7 +299,8 @@ server.json                 config (mode 0600: holds the server token and RCON p
   plugins/<id>/             unpacked host plugins
   data/<id>/                each plugin's dataDir; storage.json lives here
   cache/<sha256>.tgz        downloaded packages
-  logs/host.log
+  logs/host.log             the host's own log
+  logs/game.log             the game's console output, timestamped (see `logs` below)
 ```
 
 `server.json`:
@@ -335,9 +336,20 @@ server.json                 config (mode 0600: holds the server token and RCON p
   "bridge": { "enabled": true, "port": 27100 },
   "privacy": { "showPlayerNames": false },
   "security": { "requireSignatures": false, "trustedKeys": {} },
+  "logs": { "maxFileMegabytes": 20, "keepFiles": 3, "game": true, "repeatsPerMinute": 5, "ignore": [] },
   "plugins": { "<id>": { "enabled": true, "config": {}, "sandbox": true, "memoryMb": 64, "timeLimitMs": 1000, "allowPrivateNetwork": false } }
 }
 ```
+
+**Logs.** `logs/host.log` and `logs/game.log` are rotated past `maxFileMegabytes`, to `.1`, `.2`, …,
+keeping `keepFiles` old ones, so neither can outgrow a fixed size. Game lines are also printed
+unless `start --quiet`. Lines that say nothing are left out entirely, even from plugins (`parsers.ts`
+`CONSOLE_NOISE`: the per-frame console poll, port scanners' stray packets, a silent client's
+keepalives, 0 ms "excessive CPU" warnings, the game's voice-line data warnings, and the
+once-a-minute performance report when it reports nothing). Each distinct game line is logged at
+most `repeatsPerMinute` times a minute; the rest are counted (`[N more in 60 s, not logged] …`): a
+game printing the same line every tick once grew a log by 180 MB in a day. `ignore` takes further
+regular expressions for lines to leave out of the logs (plugins still see them).
 
 ### Launch
 

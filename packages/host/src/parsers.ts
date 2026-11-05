@@ -81,18 +81,41 @@ function tagFields(m: RegExpExecArray) {
 }
 
 /**
+ * Console lines that say nothing: the host neither parses, logs nor passes them to plugins.
+ * Whole-line patterns, so a chat message can't end in one and be hidden. Seen on builds 6796–6848.
+ */
+const CONSOLE_NOISE: readonly RegExp[] = [
+  // Every frame (~60 a second, for as long as the server runs) when the server's stdin is not a
+  // console, which it never is under the host.
+  /^CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents$/,
+  // Port scanners and stale clients, from server start on.
+  /^Ignored bad \S+\.\s+Stray data packet from host with no connection\.\s+Ignoring\.$/,
+  // Five a second while a client is silent; "timing out, last received …" says it once.
+  /^\[#\d+ UDP .*\] \d+ reply timeouts, last recv [\d.]+ms ago\.\s+Sending keepalive\.$/,
+  // "Excessive" at 0 ms, several a minute per player.
+  /^NetChan .+ ProcessMessages excessive CPU usage\.\s+0ms to process \d+ messages this call\./,
+  // Hundreds at every start, from the game's own voice-line data.
+  /^response rule \S+ has no (?:speaker|CONCEPT)!$/,
+  /^scripts\/talker\/response_rules\.vrr \| : discarded rule because of invalid criterion \d+:\s+\S+$/,
+  /^Multiple definitions for criteria '[^']*'$/,
+  // The once-a-minute performance report, when there is nothing to report: what remains is a
+  // slow frame count or trooper delays.
+  /^Total troopers last minute: avg:0\.0 peak:0 delays:0s\s+0\.0\|0\.0\|0\.0\|0\.0$/,
+  /^Avg Frame: [\d.]+ms, Avg Idle: [\d.]+ms - \d+ frames$/,
+  /^Performant - \d+ frames \(100\.0%\)/,
+  /^(?:Frame Time >|Idle Time <)[\d.]+ms - 0 frames \(/,
+];
+
+export function isConsoleNoise(line: string): boolean {
+  const body = stripLogPrefix(line);
+  return CONSOLE_NOISE.some((re) => re.test(body));
+}
+
+/**
  * Deadlock prefixes every console line with a timestamp and a channel tag:
  * `10/19 23:56:49 [Server] SV:  ServerSteamID=[A:1:…] (…).` Strips exactly one of each, so the
  * whole-line patterns below see what the engine wrote (and a player name can't add a second).
  */
-/**
- * Printed every frame (~60 a second, for as long as the server runs) when the server's stdin is
- * not a console, which it never is under the host. Seen on build 6796 with and without -console.
- */
-export function isConsoleNoise(line: string): boolean {
-  return /CTextConsoleWin::GetLine: !GetNumberOfConsoleInputEvents\s*$/.test(line);
-}
-
 export function stripLogPrefix(line: string): string {
   return line
     .trim()

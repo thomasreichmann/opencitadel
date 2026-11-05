@@ -113,6 +113,20 @@ export const hostConfigValidator = v.object({
       port: v.withDefault(v.int({ min: 1, max: 65535 }), DEFAULT_BRIDGE_PORT),
     }),
   ),
+  logs: section(
+    v.object({
+      /** logs/host.log and logs/game.log are rotated past this size, to `.1`, `.2`, … */
+      maxFileMegabytes: v.withDefault(v.int({ min: 1, max: 1024 }), 20),
+      /** Rotated files kept of each. */
+      keepFiles: v.withDefault(v.int({ min: 0, max: 50 }), 3),
+      /** Write the game's console output to logs/game.log (it is also printed unless `start --quiet`). */
+      game: v.withDefault(v.bool(), true),
+      /** The same game line is logged at most this often a minute; the rest are counted. */
+      repeatsPerMinute: v.withDefault(v.int({ min: 1, max: 100_000 }), 5),
+      /** Game console lines to leave out of the logs, as regular expressions (plugins still see them). */
+      ignore: v.withDefault(v.array(v.string({ min: 1, max: 300 }), { max: 64 }), []),
+    }),
+  ),
   plugins: v.withDefault(
     v.record(
       v.object({
