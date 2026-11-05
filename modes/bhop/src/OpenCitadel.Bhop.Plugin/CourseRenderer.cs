@@ -111,6 +111,8 @@ internal sealed class CourseRenderer {
 	public long SpawnedBytes { get; private set; }
 	/// <summary>Rows the current map has in all.</summary>
 	public int Total => _fixed.Count + _details.Count;
+	/// <summary>Rows of the whole course, drawn or not.</summary>
+	public int Rows { get; private set; }
 	/// <summary>What all of the current map's rows would cost at once.</summary>
 	public long TotalBytes { get; private set; }
 	/// <summary>Rows always drawn (all of them for a map within the budget).</summary>
@@ -125,9 +127,10 @@ internal sealed class CourseRenderer {
 	/// Starts drawing a map's panels, replacing whatever was drawn: never more than
 	/// <paramref name="budgetBytes"/> (see <see cref="PanelLayout.GlyphRow.NetworkBytes"/>) or
 	/// <paramref name="maxEntities"/> rows at once, of which <paramref name="fixedShare"/> for the
-	/// largest panels when the map needs more.
+	/// largest panels when the map needs more. The rest is streamed in near players, or with
+	/// <paramref name="stream"/> off, left out.
 	/// </summary>
-	public void Show(IEnumerable<MapPanel> panels, long budgetBytes, int maxEntities, float fixedShare) {
+	public void Show(IEnumerable<MapPanel> panels, long budgetBytes, int maxEntities, float fixedShare, bool stream = true) {
 		Clear();
 		var items = new List<Item>();
 		foreach (var p in panels) {
@@ -145,6 +148,7 @@ internal sealed class CourseRenderer {
 			cell.Add(item);
 		}
 		TotalBytes = items.Sum(i => (long)i.Bytes);
+		Rows = items.Count;
 		var keep = 0;
 		long kept = 0;
 		if (TotalBytes <= budgetBytes && items.Count <= maxEntities) {
@@ -161,7 +165,7 @@ internal sealed class CourseRenderer {
 		_detailCount = Math.Max(0, maxEntities - keep);
 		_fixed = items.GetRange(0, keep);
 		foreach (var item in _fixed) item.IsFixed = true;
-		_details = items.GetRange(keep, items.Count - keep);
+		_details = stream ? items.GetRange(keep, items.Count - keep) : new List<Item>();
 		foreach (var item in _details) {
 			var o = item.Row.Origin;
 			var key = ((int)MathF.Floor(o.X / Cell), (int)MathF.Floor(o.Y / Cell), (int)MathF.Floor(o.Z / Cell));

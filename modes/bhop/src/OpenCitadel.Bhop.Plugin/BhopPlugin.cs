@@ -68,10 +68,8 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		for (var slot = 0; slot <= Players.MaxSlot; slot++) {
 			if (!ctx.Recipients.HasRecipient(slot)) continue;
 			if (DeadworksManaged.Api.UI.UI.HasClientBootstrap(slot)) left++;
-			else if (CaptionProbe(slot, now)) {
-				left++;
-				Log($"[{slot}] UI handshake caption ({ctx.Message.CalculateSize()} bytes) sent {(now - _joinedAt[slot]) / 1000.0:0.0} s after joining");
-			} else ctx.Recipients.Remove(slot);
+			else if (CaptionProbe(slot, now)) left++;
+			else ctx.Recipients.Remove(slot);
 		}
 		// Deadworks probes one player per frame; with nobody left to send to, drop it altogether.
 		return left == 0 ? HookResult.Stop : HookResult.Continue;
@@ -143,10 +141,17 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			["citadel_player_spawn_time_max_respawn_time"] = "1",
 			["citadel_voice_all_talk"] = "1",
 			["sv_alltalk"] = "1",
+			// How many ticks of each client's history the server keeps (128 by default: 2 s). A client
+			// that stalls for longer, as slower PCs do while taking in a drawn course, can't be sent a
+			// delta any more and is sent everything again, which takes it longer still; such clients
+			// went silent and timed out. 10 s lets them catch up.
+			["sv_maxclientframes"] = "640",
 		};
 		if (Config.Mode == MovementMode.Exact) {
-			// Clients can't predict movement the plugin computes, so they show the server's result.
-			vars["sv_client_predict"] = "0";
+			// Clients predict their hero in noclip: a straight line at the networked velocity, which the
+			// plugin aims along the simulated path (ClientPrediction). Without it, they show the
+			// server's result, interpolated.
+			vars["sv_client_predict"] = Config.ClientPrediction ? "1" : "0";
 			// NoclipVelocity: with no input and no friction, noclip carries the velocity we set unchanged.
 			vars["sv_noclipfriction"] = "0";
 			vars["sv_noclipaccelerate"] = "0";
@@ -210,12 +215,17 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 	private void LogLeave(ClientDisconnectedEvent args) {
 		var now = Environment.TickCount64;
 		var slot = args.Slot;
+		if (_joinedAt[slot] == 0) {
+			Log($"[{slot}] {args.Controller?.PlayerName ?? "?"} left ({args.Reason}); joined before the plugin was loaded");
+			return;
+		}
 		var stayed = (now - _joinedAt[slot]) / 1000.0;
 		var input = _lastInputAt[slot] >= _joinedAt[slot] && _joinedAt[slot] != 0
 			? $"last input {(_lastInputAt[slot] - _joinedAt[slot]) / 1000.0:0.0} s after joining"
 			: "no input since joining";
 		Log($"[{slot}] {args.Controller?.PlayerName ?? "?"} left ({args.Reason}) after {stayed:0.0} s, {input}; " +
 		    $"{_renderer.Spawned} panel entities drawn");
+		if (_players[slot] is { } p) Log($"[{slot}] on {_mapName}: {p.Stats}");
 	}
 
 	// ------------------------------------------------------------------ leavers
@@ -295,15 +305,13 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		Vector3? teleportAngles = null;
 		foreach (var cmd in args.Usercmds) {
 			// Clients resend recent commands in case packets are lost, and the engine runs each one
-			// once. Deadlock leaves the command number at 0, so commands are told apart by the client
-			// tick they were made on. A big step back means the client restarted its clock.
+			// once. Deadlock leaves the command number at 0, and the client tick doesn't tell commands
+			// apart either: a client drawing fewer frames than the server's 64 ticks makes two commands
+			// in some frames and gives both that frame's tick. Each command has its own random seed.
 			var number = cmd.Base?.ClientTick ?? 0;
-			if (p.Script == null && number != 0) {
-				if (number <= p.LastCommand && p.LastCommand - number < 256) {
-					Usercmds.Neutralize(cmd);
-					continue;
-				}
-				p.LastCommand = number;
+			if (p.Script == null && cmd.Base != null && !p.Seen.Add(number, cmd.Base.RandomSeed)) {
+				Usercmds.Neutralize(cmd);
+				continue;
 			}
 			simulated++;
 			if (Config.LogMovement && p.Script == null) {
@@ -312,14 +320,21 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 				Log($"[{p.Slot}] raw #{number} tick={cmd.Base?.ClientTick} held={bs?.Buttonstate1:X} changed={bs?.Buttonstate2:X} fwd={cmd.Base?.Forwardmove:0.00} left={cmd.Base?.Leftmove:0.00} subticks=[{subticks}]");
 			}
 			var input = Usercmds.Decode(cmd, _tickInterval, _movement.Settings.InputSpeed);
+			p.LastInput = input;
+			// How far ahead of the server's last answer the client draws its hero, in 1/256 ticks.
+			p.PredictionTicks = (int)Math.Min(((cmd.Base?.PredictionOffsetTicksX256 ?? 0u) + 128u) / 256u, PredictionForecast.MaxTicks);
 			TrackSync(p, input);
 			_zones?.ApplySlide(p.State, _movement.Settings, _movement.World);
+			var from = p.State.Origin;
 			var result = _movement.Simulate(p.State, input);
+			if (_probeSlot >= 0) LogProbe(p, cmd, number, pawn);
 			Usercmds.Neutralize(cmd);
+			var mapTeleport = false;
 			if (_map != null) {
 				p.SimTime += _tickInterval;
 				var touch = _map.Touch(p.State, _movement.Settings, p.Triggers, p.SimTime);
 				if (touch.Teleported) {
+					mapTeleport = true;
 					teleported = true;
 					teleportAngles = touch.NewViewAngles;
 					if (Config.LogMovement) Log($"[{p.Slot}] {touch.Reason} -> {Fmt(p.State.Origin)}");
@@ -329,6 +344,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 					if (ev is { } e) OnRunEvent(p, args.Controller!, e);
 				}
 			}
+			if (p.Script == null) p.Stats.Tick(p.State, input, from, result.Jumped, mapTeleport);
 			if (Config.LogMovement) {
 				Log($"[{p.Slot}] cmd fwd={input.ForwardMove:0} side={input.SideMove:0} btn={input.Buttons} yaw={input.ViewAngles.Y:0.0} " +
 				    $"-> o={Fmt(p.State.Origin)} v={Fmt(p.State.Velocity)} spd={Speed2D(p.State.Velocity):0.0} g={p.State.GroundEntity}" +
@@ -339,17 +355,27 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		p.PendingCmds = simulated;
 
 		if (teleported) {
+			if (p.Script == null) TeleportTip(p, args.Controller);
 			// A map teleport snaps the hero (and the view, when the destination sets one).
 			if (teleportAngles is { } angles) pawn.TeleportWithView(p.State.Origin, angles);
 			else pawn.Teleport(position: p.State.Origin);
 			pawn.AbsVelocity = p.State.Velocity;
+			p.NetworkVelocity = p.State.Velocity;
 			return;
 		}
+		p.NetworkVelocity = NetworkVelocity(p);
 
 		switch (Config.ApplyMethod) {
 			case ApplyMethod.NoclipVelocity: {
 				// The engine moves the hero velocity × tick once per usercmd; aim that at the simulated position.
 				var steps = Math.Max(1, simulated);
+				if (Config.ClientPrediction) {
+					// The hero must be networked with one velocity throughout (some ticks are sent straight
+					// after the engine runs these commands, others after OnGameFrame), so the engine moves
+					// it with that velocity, from wherever that lands it on the simulated position.
+					PlaceForMove(pawn, p.State.Origin - p.NetworkVelocity * (steps * _tickInterval), p.NetworkVelocity);
+					break;
+				}
 				var delta = p.State.Origin - pawn.Position;
 				pawn.AbsVelocity = delta / (steps * _tickInterval);
 				break;
@@ -359,6 +385,35 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 				break;
 		}
 		p.LastSimulated = before;
+	}
+
+	/// <summary>
+	/// Moves a hero without the teleport showing: Teleport also bumps the entity's interpolation
+	/// counter, and every client that sees it change snaps the hero there instead of gliding, so done
+	/// each tick, everyone else would see the player stutter. The counter is put back.
+	/// </summary>
+	private static void PlaceForMove(CCitadelPlayerPawn pawn, Vector3 position, Vector3 velocity) {
+		var frame = pawn.GetField<byte>("CBaseEntity"u8, "m_ubInterpolationFrame"u8);
+		pawn.Teleport(position: position, velocity: velocity);
+		pawn.SetField<byte>("CBaseEntity"u8, "m_ubInterpolationFrame"u8, frame);
+	}
+
+	/// <summary>Movement for forecasting only (see PredictionForecast), so the real one's state is untouched.</summary>
+	private CssMovement? _forecastMovement;
+	private readonly System.Diagnostics.Stopwatch _forecastClock = new();
+	private long _forecastTicks;
+
+	/// <summary>The velocity a player's hero is networked with: see <see cref="BhopConfig.ClientPrediction"/>.</summary>
+	private Vector3 NetworkVelocity(BhopPlayer p) {
+		if (!Config.ClientPrediction || p.Script != null || p.PredictionTicks <= 0) return p.State.Velocity + p.State.BaseVelocity;
+		var forecast = _forecastMovement ??= new CssMovement(_movement.Settings, _movement.World);
+		forecast.Settings = _movement.Settings;
+		forecast.World = _movement.World;
+		_forecastClock.Start();
+		var velocity = PredictionForecast.NetworkVelocity(forecast, p.State, p.LastInput, p.PredictionTicks);
+		_forecastClock.Stop();
+		_forecastTicks += Math.Min(p.PredictionTicks, PredictionForecast.MaxTicks);
+		return velocity;
 	}
 
 	/// <summary>
@@ -399,7 +454,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 				p.PersonalBests.GetValueOrDefault(track), _recordTexts.GetValueOrDefault(track), StyleFor(track), p.Keys, finished);
 			if (!Hud.Available(p.Slot)) {
 				// No Deadworks client bootstrap (nothing installed): the timer in world text instead.
-				if (controller.GetHeroPawn() is { } pawn) _worldHud.Show(p.Slot, pawn, WorldHud.Text(state));
+				if (controller.GetHeroPawn() is { } pawn) _worldHud.Show(p.Slot, pawn, WorldHud.Text(state with { Hint = Hint(p) }));
 				continue;
 			}
 			_worldHud.Remove(p.Slot);
@@ -412,6 +467,30 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			Hud.Update(controller, state, ref shown);
 			p.HudKeys = shown;
 		}
+	}
+
+	/// <summary>
+	/// How to play, under the timer, until the player has the hang of it. Of the first outside players
+	/// on bhop_badges, none jumped more than 24 times; they walked onto its blocks, were sent back to
+	/// the start five to nine times, and left. The welcome in chat is easily missed.
+	/// </summary>
+	private string? Hint(BhopPlayer p) {
+		if (_freeFly || Config.Mode != MovementMode.Exact) return null;
+		if (_mapName.StartsWith("surf_", StringComparison.OrdinalIgnoreCase))
+			return p.Stats.TopSpeed < 700 ? "Land on a ramp's slope, hold A or D into it" : null;
+		if (p.Stats.Jumps < 12) return _movement.Settings.AutoBhop ? "Hold SPACE: you hop as you land" : "Press SPACE as you land";
+		if (p.Stats.TopSpeed < 400) return "In the air: A + mouse left, D + mouse right";
+		return null;
+	}
+
+	/// <summary>
+	/// Said in chat to a player who keeps being sent back while barely jumping: on multihop maps
+	/// (badges, arcane, kz_ocean), standing on a block for a moment teleports you back.
+	/// </summary>
+	private static void TeleportTip(BhopPlayer p, CCitadelPlayerController? controller) {
+		if (p.TeleportTipped || controller == null || p.Stats.MapTeleports < 2 || p.Stats.Jumps >= 30) return;
+		p.TeleportTipped = true;
+		Chat.PrintToChat(controller, "Sent back? Keep SPACE held the whole way: you hop again the moment you land. On maps like this one, standing on a block sends you back.");
 	}
 
 	private void RefreshRecords() {
@@ -432,6 +511,8 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 	private readonly List<Vector3> _playerSpots = new();
 
 	private readonly System.Diagnostics.Stopwatch _drawClock = new();
+	/// <summary>A frame of drawing worth logging: a sixth of a 64-tick frame.</summary>
+	private const double DrawSlowMs = 2.5;
 	private double _drawWorstMs;
 	private int _drawFrames;
 	private long _drawCreated, _drawRemoved;
@@ -443,15 +524,20 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			_playerSpots.Clear();
 			// Details only around players whose client has had time to take in the course (see DetailDelaySeconds).
 			var settled = Environment.TickCount64 - (long)(Config.DetailDelaySeconds * 1000);
-			foreach (var p in _players)
-				if (p is { Active: true } && _joinedAt[p.Slot] <= settled && _courseShownAt <= settled) _playerSpots.Add(p.State.Origin);
+			if (Config.StreamDetails)
+				foreach (var p in _players)
+					if (p is { Active: true } && _joinedAt[p.Slot] <= settled && _courseShownAt <= settled) _playerSpots.Add(p.State.Origin);
 			if (_renderer.Tick(Config.PanelsPerFrame, _playerSpots, Config.DetailRadius) is { } line) Log($"{_mapName}: {line}");
 			if (Config.BackFaceRadius > 0) CullBackFaces();
-			// What drawing costs the server per frame (a 64-tick frame is 15.6 ms), logged every 30 s.
+			// What drawing costs the server per frame (a 64-tick frame is 15.6 ms), checked every 30 s
+			// and logged when something changed or a frame took long.
 			_drawWorstMs = Math.Max(_drawWorstMs, _drawClock.Elapsed.TotalMilliseconds);
 			if (++_drawFrames >= 64 * 30) {
-				var churn = _renderer.Streaming ? $", {_renderer.Created - _drawCreated} created and {_renderer.Removed - _drawRemoved} removed since" : "";
-				Log($"drawing {_mapName}: {_renderer.Spawned} panel entities ({_renderer.SpawnedBytes / 1024} KiB){churn}, worst frame {_drawWorstMs:0.0} ms");
+				var churned = _renderer.Created != _drawCreated || _renderer.Removed != _drawRemoved;
+				if (churned || _drawWorstMs >= DrawSlowMs) {
+					var churn = churned ? $", {_renderer.Created - _drawCreated} created and {_renderer.Removed - _drawRemoved} removed since" : "";
+					Log($"drawing {_mapName}: {_renderer.Spawned} panel entities ({_renderer.SpawnedBytes / 1024} KiB){churn}, worst frame {_drawWorstMs:0.0} ms");
+				}
 				_drawFrames = 0;
 				_drawWorstMs = 0;
 				_drawCreated = _renderer.Created;
@@ -460,6 +546,12 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		}
 		if (!simulating || Config.Mode != MovementMode.Exact) return;
 		if (++_hudTick % 6 == 0) UpdateHuds();
+		if (_hudTick % (64 * 600) == 0 && _forecastTicks > 0) {
+			// What client prediction costs the server, logged every 10 minutes while anyone predicts.
+			Log($"prediction: {_forecastTicks} ticks forecast in the last 10 min, {_forecastClock.Elapsed.TotalMilliseconds:0} ms");
+			_forecastTicks = 0;
+			_forecastClock.Reset();
+		}
 		if (_freeFly) return; // the engine's noclip moves everyone
 		foreach (var p in _players) {
 			if (p is not { Active: true } || p.PendingCmds == 0) continue;
@@ -470,9 +562,10 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			if (Config.LogMovement && error > 0.5f) Log($"[{p.Slot}] hero at {Fmt(pawn.Position)}, simulated {Fmt(p.State.Origin)} (off by {error:0.00})");
 			if (Config.ApplyMethod == ApplyMethod.NoclipVelocity) {
 				// The client predicts its own hero in noclip, which with sv_noclipaccelerate and
-				// sv_noclipfriction at 0 (both replicated) just carries the networked velocity forward.
-				// Network the simulated velocity so that prediction runs where the simulation goes.
-				pawn.AbsVelocity = p.State.Velocity + p.State.BaseVelocity;
+				// sv_noclipfriction at 0 (both replicated) just carries the networked velocity forward:
+				// network the one that makes that follow the simulation (NetworkVelocity), in place of
+				// the catch-up velocity that moved the hero when clients don't predict.
+				pawn.AbsVelocity = p.NetworkVelocity;
 			}
 			p.PendingCmds = 0;
 		}
@@ -501,6 +594,20 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		}
 	}
 
+	/// <summary>
+	/// What a newcomer needs to know, in chat, once a visit. Players arrive from Deadlock's server
+	/// browser expecting Deadlock, and most left within a minute without trying a run.
+	/// </summary>
+	private void Welcome(int slot) {
+		if (_players[slot] is not { Active: true, Script: null } || Players.FromSlot(slot) is not { } controller) return;
+		var surf = _mapName.StartsWith("surf_", StringComparison.OrdinalIgnoreCase);
+		Chat.PrintToChat(controller, "Welcome! This server plays Counter-Strike: Source bunny hopping and surfing, on maps ported from CS:S. No abilities, just movement.");
+		Chat.PrintToChat(controller, surf
+			? "Surf: land on a ramp's slope, hold A or D toward the ramp to ride it, and steer with the mouse."
+			: "Hold jump to keep hopping. In the air, hold A or D and turn the mouse the same way to gain speed.");
+		Chat.PrintToChat(controller, "Type !r to go back to the start, !top for the fastest times.");
+	}
+
 	private void Activate(BhopPlayer p, CCitadelPlayerPawn pawn) {
 		p.State = new PlayerMoveState();
 		p.Triggers = new TriggerState();
@@ -517,6 +624,13 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		if (!_movement.Unstick(p.State)) Log($"[{p.Slot}] spawned stuck at {Fmt(p.State.Origin)}");
 		p.Spawn = p.State.Origin;
 		p.SpawnAngles = viewAngles;
+		if (!p.ResumeInPlace && _zones?.StartOf(0) is { Teleport: { } start } startZone) {
+			// Start in the start zone, as bhop servers do, rather than at the map's spawn: some
+			// spawns face a wall, or lie away from the course with nothing to say where it begins.
+			p.State.Teleport(start.ToVector3(), Vector3.Zero);
+			_movement.Unstick(p.State);
+			if (startZone.TeleportYaw is { } yaw) viewAngles = new Vector3(0, yaw, 0);
+		}
 		if (p.ResumeInPlace) {
 			// After a plugin reload: remember the spawn for !spawn, but keep the player where they are.
 			p.ResumeInPlace = false;
@@ -525,6 +639,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			viewAngles = null;
 		}
 		p.Active = true;
+		p.Stats.Moved();
 		p.MaxError = 0;
 		p.ScriptTick = 0;
 		p.HudBuilt = false;
@@ -534,6 +649,11 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			p.GreetedMap = _mapName;
 			var by = _map.Data.Credits.Count > 0 ? "by " + string.Join(", ", _map.Data.Credits) : "Ported CS:S bhop map";
 			pawn.Controller?.HudAnnounce(_mapName, by);
+		}
+		if (p.Script == null && !p.Welcomed) {
+			p.Welcomed = true;
+			var slot = p.Slot;
+			Timer.Once(4.Seconds(), () => Welcome(slot));
 		}
 		pawn.SetMoveType(Config.ApplyMethod == ApplyMethod.Teleport ? MoveType.None : MoveType.NoClip);
 		pawn.SetGravityScale(0f);
@@ -549,7 +669,10 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		if (viewAngles is { } a) pawn.TeleportWithView(p.State.Origin, a);
 		else pawn.Teleport(position: p.State.Origin);
 		pawn.AbsVelocity = Vector3.Zero;
-		Log($"[{p.Slot}] exact movement on at {Fmt(p.State.Origin)}{(_map != null ? $" on {_map.Data.Name}" : "")}, tick {_tickInterval * 1000:0.000} ms");
+		// Heroes respawn two or three times as a player joins; one line says it.
+		var activated = $"exact movement on at {Fmt(p.State.Origin)}{(_map != null ? $" on {_map.Data.Name}" : "")}, tick {_tickInterval * 1000:0.000} ms";
+		if (activated != p.LastActivation) Log($"[{p.Slot}] {activated}");
+		p.LastActivation = activated;
 	}
 
 	// ------------------------------------------------------------------ timer and records
@@ -572,9 +695,11 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			case RunEventKind.Started:
 				p.SyncGood = p.SyncTotal = 0;
 				p.FinishedText = null;
+				p.Stats.RunStarted();
 				if (Config.LogMovement) Log($"[{p.Slot}] run started at {e.Speed:0} u/s");
 				break;
 			case RunEventKind.Checkpoint:
+				p.Stats.Checkpoint(e.Checkpoint);
 				controller.HudAnnounce($"Checkpoint {e.Checkpoint}", RecordStore.Format(e.Time));
 				break;
 			case RunEventKind.Stopped:
@@ -587,6 +712,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 					Jumps = e.Jumps, MaxSpeed = p.Timer.MaxSpeed, Style = StyleFor(e.Track),
 				};
 				var result = (_records ??= new RecordStore(RecordsDir)).Submit(_mapName, run);
+				p.Stats.Finished();
 				var time = RecordStore.Format(e.Time);
 				var detail = result.MapRecord ? "New map record!"
 					: result.PersonalBest ? (result.PreviousBest is { } prev ? $"Personal best, {RecordStore.Format(prev - e.Time)} faster. Rank {result.Rank}" : $"First finish. Rank {result.Rank}")
@@ -701,6 +827,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 
 	[Command("top", Description = "Fastest times on this map (or on the bonus you are running)")]
 	public void CmdTop(CCitadelPlayerController caller) {
+		_players[caller.Slot]?.Stats.Used("top");
 		var track = _players[caller.Slot]?.Timer.Track ?? 0;
 		var top = (_records ??= new RecordStore(RecordsDir)).Top(_mapName, StyleFor(track)).Take(10).ToList();
 		var lines = top.Count == 0 ? ["No times yet."] : top.Select((r, i) => $"{i + 1}. {RecordStore.Format(r.Time)}  {r.Name}  ({r.Jumps} jumps)").ToList();
@@ -835,13 +962,13 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			_mapName = data.Name;
 			_zones = ZoneSet.For(data, LoadZones(data.Name));
 			if (drawn) {
-				if (Config.DrawCourses) _renderer.Show(data.Panels, Config.MaxPanelKilobytes * 1024L, Config.MaxPanelEntities, Config.FixedPanelShare);
+				if (Config.DrawCourses) _renderer.Show(data.Panels, Config.MaxPanelKilobytes * 1024L, Config.MaxPanelEntities, Config.FixedPanelShare, Config.StreamDetails);
 				_courseShownAt = Environment.TickCount64;
 				Log($"{data.Name} runs on {Server.MapName}, moved by {Fmt(_offset)}" +
 				    (!Config.DrawCourses ? "; not drawn (DrawCourses is off)"
-					    : _renderer.Streaming ? $"; {data.Panels.Count} panels as {_renderer.Total} entities ({_renderer.TotalBytes / 1024} KiB), over the budget of " +
+					    : _renderer.Fixed < _renderer.Rows ? $"; {data.Panels.Count} panels as {_renderer.Rows} entities ({_renderer.TotalBytes / 1024} KiB), over the budget of " +
 					                            $"{Config.MaxPanelKilobytes} KiB or {Config.MaxPanelEntities} entities: the largest {_renderer.Fixed} ({_renderer.FixedBytes / 1024} KiB) " +
-					                            $"drawn, the rest streamed within {Config.DetailRadius:0} units of players"
+					                            (Config.StreamDetails ? $"drawn, the rest streamed within {Config.DetailRadius:0} units of players" : "drawn, the rest left out (StreamDetails is off)")
 					    : $"; drawing {data.Panels.Count} panels as {_renderer.Total} entities ({_renderer.TotalBytes / 1024} KiB)"));
 				if (Config.DrawCourses && data.Panels.Count == 0) Log($"{data.Name} has no panels: port it again with citadel-port course so players see it");
 				// Tell OpenCitadel's bridge (if installed) which map players are on, for listings and rotation.
@@ -959,10 +1086,14 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 	// ------------------------------------------------------------------ commands
 
 	[Command("r", "restart", Description = "Back to the start")]
-	public void CmdRestart(CCitadelPlayerController caller) => SendToStart(caller, 0);
+	public void CmdRestart(CCitadelPlayerController caller) {
+		_players[caller.Slot]?.Stats.Used("r");
+		SendToStart(caller, 0);
+	}
 
 	[Command("b", "bonus", Description = "To a bonus course's start: b [number]")]
 	public void CmdBonus(CCitadelPlayerController caller, int bonus = 1) {
+		_players[caller.Slot]?.Stats.Used("b");
 		if (_zones?.StartOf(bonus) == null || bonus < 1) {
 			var bonuses = _zones?.Tracks.Where(t => t > 0).ToList() ?? [];
 			Chat.PrintToChat(caller, bonuses.Count == 0 ? $"{_mapName} has no bonus." : $"Bonuses on {_mapName}: {string.Join(", ", bonuses)}.");
@@ -974,6 +1105,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 	[Command("spawn", Description = "Back to where you spawned on this map (not the start zone)")]
 	public void CmdSpawn(CCitadelPlayerController caller) {
 		if (_players[caller.Slot] is not { Active: true } p) return;
+		p.Stats.Used("spawn");
 		SendTo(caller, p, p.Spawn, p.SpawnAngles);
 	}
 
@@ -987,6 +1119,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 
 	/// <summary>Moves a player (and their simulated state) somewhere, stopping their run.</summary>
 	private void SendTo(CCitadelPlayerController caller, BhopPlayer p, Vector3 target, Vector3? angles) {
+		p.Stats.Moved();
 		p.State.Teleport(target, Vector3.Zero);
 		_movement.Unstick(p.State);
 		p.Triggers = new TriggerState();
@@ -998,7 +1131,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		pawn.AbsVelocity = Vector3.Zero;
 	}
 
-	[Command("bhopmode", Description = "Switch movement mode: exact or native")]
+	[Command("bhopmode", Description = "Switch movement mode for everyone: exact or native", Permission = "bhop.mode")]
 	public void CmdMode(CCitadelPlayerController caller, string mode) {
 		if (!Enum.TryParse<MovementMode>(mode, ignoreCase: true, out var m)) {
 			Chat.PrintToChat(caller, "usage: !bhopmode exact|native");
@@ -1018,7 +1151,7 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 		Log($"mode switched to {m} by slot {caller.Slot}");
 	}
 
-	[Command("bhopapply", Description = "How exact mode moves the hero: teleport or noclip")]
+	[Command("bhopapply", Description = "How exact mode moves the hero, for everyone: teleport or noclip", Permission = "bhop.mode")]
 	public void CmdApply(CCitadelPlayerController caller, string method) {
 		ApplyMethod m;
 		if (method.StartsWith("tele", StringComparison.OrdinalIgnoreCase)) m = ApplyMethod.Teleport;
@@ -1093,6 +1226,90 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 			if (p is not { Active: true } || Players.FromSlot(p.Slot) is not { } controller) continue;
 			SendTo(controller, p, panels[_tourRandom.Next(panels.Count)].Origin.ToVector3() + new Vector3(0, 0, 100), null);
 		}
+	}
+
+	private int _probeSlot = -1;
+	private long _probeUntil;
+
+	/// <summary>
+	/// For measuring what a player sees: throws the first player upward and logs, for every command
+	/// their client sends, the simulated height beside the height of the camera the client drew that
+	/// frame from, how many ticks ahead the client predicts, and the velocity the hero is networked
+	/// with. With prediction off, the camera curve trails the simulated one by the client's delay.
+	/// With it on, launch the client with +cl_showerror 2 and -condebug: its console.log lists every
+	/// prediction miss (the throw itself is one, being nothing the client could foresee).
+	/// </summary>
+	[Command("bhopprobe", Description = "Testing: throw the first player upward and log where their client draws them: bhopprobe <speed> [seconds]", ServerOnly = true)]
+	public void CmdProbe(float speed, float seconds = 2f) {
+		if (_players.FirstOrDefault(p => p is { Active: true, Script: null }) is not { } p) {
+			Log("probe: no player");
+			return;
+		}
+		p.State.Velocity = new Vector3(0, 0, speed);
+		p.State.GroundEntity = -1;
+		_probeSlot = p.Slot;
+		_probeUntil = Environment.TickCount64 + (long)(seconds * 1000);
+		Log($"probe: [{p.Slot}] thrown up at {speed} u/s from z {p.State.Origin.Z:0.0}");
+	}
+
+	private void LogProbe(BhopPlayer p, CCitadelUserCmdPB cmd, int number, CCitadelPlayerPawn pawn) {
+		if (_probeSlot != p.Slot) return;
+		if (Environment.TickCount64 > _probeUntil) {
+			_probeSlot = -1;
+			Log("probe over");
+			return;
+		}
+		var camera = cmd.VecCameraPosition;
+		Log($"probe #{number} sim {p.State.Origin.Z:0.0} hero {pawn.Position.Z:0.0} camera {(camera != null ? camera.Z.ToString("0.0") : "-")} at {Environment.TickCount64 % 100000} " +
+		    $"predicting {cmd.Base?.PredictionOffsetTicksX256 / 256f:0.00} ticks, networked {p.NetworkVelocity.Z:0.0}, simulated {p.State.Velocity.Z:0.0}");
+	}
+
+	/// <summary>
+	/// Spawns an entity next to the first player, following them, to try stock entities live:
+	/// keyvalues as key=value|key=value; a value of three or four numbers split by commas is a colour,
+	/// a whole number an int, a number a float, anything else a string. "clear" removes them all.
+	/// Only with nobody else on the server: some stock classes crash every client that is sent them
+	/// (light_omni or light_dynamic did, build 6848).
+	/// </summary>
+	[Command("bhopent", Description = "Testing: spawn an entity by the first player: bhopent <class|clear> [back] [up] [key=value|...]", ServerOnly = true)]
+	public void CmdEnt(string classname, float back = 0f, float up = 0f, string keyvalues = "") {
+		const string name = "bhop_test";
+		if (classname == "clear") {
+			foreach (var old in Entities.ByName(name).ToList()) old.Remove();
+			return;
+		}
+		if (_players.FirstOrDefault(p => p is { Active: true, Script: null }) is not { } p ||
+		    Players.FromSlot(p.Slot)?.GetHeroPawn() is not { } pawn) {
+			Log("ent: no player");
+			return;
+		}
+		var e = CBaseEntity.CreateByName(classname);
+		if (e == null) {
+			Log($"ent: no class {classname}");
+			return;
+		}
+		var yaw = p.LastInput.ViewAngles.Y * MathF.PI / 180f;
+		var at = pawn.Position - new Vector3(MathF.Cos(yaw), MathF.Sin(yaw), 0) * back + new Vector3(0, 0, up);
+		var kv = new CEntityKeyValues();
+		kv.SetString("targetname", name);
+		var inv = System.Globalization.CultureInfo.InvariantCulture;
+		foreach (var pair in keyvalues.Split('|', StringSplitOptions.RemoveEmptyEntries)) {
+			var eq = pair.IndexOf('=');
+			if (eq <= 0) continue;
+			var (key, value) = (pair[..eq], pair[(eq + 1)..]);
+			var parts = value.Split(',');
+			if (parts.Length is 3 or 4 && parts.All(s => byte.TryParse(s, out _))) {
+				var c = parts.Select(byte.Parse).ToArray();
+				kv.SetColor(key, c[0], c[1], c[2], c.Length == 4 ? c[3] : (byte)255);
+			} else if (int.TryParse(value, inv, out var i)) kv.SetInt(key, i);
+			else if (float.TryParse(value, inv, out var f)) kv.SetFloat(key, f);
+			else kv.SetString(key, value);
+		}
+		kv.SetVector("origin", at);
+		e.Spawn(kv);
+		e.Teleport(at, new Vector3(90, 0, 0), null);
+		e.SetParent(pawn);
+		Log($"ent: {classname} #{e.EntityIndex} at {Fmt(at)} with {keyvalues}");
 	}
 
 	[Command("bhopleavers", Description = "List players and heroes; remove those of players who have left: bhopleavers [remove]", ServerOnly = true)]
@@ -1233,7 +1450,11 @@ public sealed class BhopPlugin : DeadworksPluginBase {
 
 	private static float Speed2D(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Y * v.Y);
 	private static string Fmt(Vector3 v) => $"({v.X:0.00} {v.Y:0.00} {v.Z:0.00})";
-	private static void Log(string message) => Console.WriteLine($"[OpenCitadel.Bhop] {message}");
+	/// <summary>
+	/// The server console formats what it is given printf-style: "4% airborne" came out as
+	/// "4 0x0.07ff65de4e998p-1022irborne", and a player named "%s%s" could crash it. So % is escaped.
+	/// </summary>
+	private static void Log(string message) => Console.WriteLine($"[OpenCitadel.Bhop] {message.Replace("%", "%%")}");
 }
 
 internal sealed class BhopPlayer(int slot) {
@@ -1249,12 +1470,24 @@ internal sealed class BhopPlayer(int slot) {
 	/// <summary>Seconds of simulated movement, the clock the map's triggers use.</summary>
 	public float SimTime { get; set; }
 	public int PendingCmds { get; set; }
-	/// <summary>Highest usercmd number simulated, to skip the copies clients resend.</summary>
-	public int LastCommand { get; set; }
+	/// <summary>Usercmds already simulated, to skip the copies clients resend.</summary>
+	public CommandHistory Seen { get; } = new();
+	/// <summary>The last input simulated, held for the prediction forecast.</summary>
+	public MoveInput LastInput { get; set; }
+	/// <summary>How many ticks ahead of the server the client draws its hero (0: it doesn't predict).</summary>
+	public int PredictionTicks { get; set; }
+	/// <summary>The velocity the hero is networked with after each tick of new commands.</summary>
+	public Vector3 NetworkVelocity { get; set; }
 	public Vector3 LastSimulated { get; set; }
 	public float MaxError { get; set; }
 	public bool HudBuilt { get; set; }
 	public string? GreetedMap { get; set; }
+	/// <summary>Told how the server plays (see Welcome), once a visit.</summary>
+	public bool Welcomed { get; set; }
+	/// <summary>Told why they keep being sent back (see TeleportTip), once a visit.</summary>
+	public bool TeleportTipped { get; set; }
+	/// <summary>The last "exact movement on" line logged for them.</summary>
+	public string? LastActivation { get; set; }
 	public MoveButtons HudKeys { get; set; }
 	public MoveButtons Keys { get; set; }
 	public float LastYaw { get; set; }
@@ -1266,6 +1499,8 @@ internal sealed class BhopPlayer(int slot) {
 	public bool ResumeInPlace { get; set; }
 	public string? FinishedText { get; set; }
 	public float FinishedUntil { get; set; }
+	/// <summary>What they did this visit, for the log when they leave.</summary>
+	public SessionStats Stats { get; } = new();
 	/// <summary>Scripted input, for test bots.</summary>
 	public StrafeScript? Script { get; set; }
 	public int ScriptTick { get; set; }

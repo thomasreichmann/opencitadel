@@ -33,6 +33,15 @@ public sealed class BhopConfig {
 	public MovementMode Mode { get; set; } = MovementMode.Exact;
 	public ApplyMethod ApplyMethod { get; set; } = ApplyMethod.NoclipVelocity;
 
+	/// <summary>
+	/// Exact mode: let each client predict its own hero, so players see themselves where they are
+	/// rather than a round trip and an interpolation delay (about 100 ms) behind. The server sends
+	/// a velocity that makes the client's prediction follow the simulated path (see
+	/// PredictionForecast); only a change of input shows up a round trip late. Off: clients draw
+	/// what the server sent, smoothly but late.
+	/// </summary>
+	public bool ClientPrediction { get; set; } = true;
+
 	/// <summary>Put the camera in the hero's head, as in Counter-Strike.</summary>
 	public bool FirstPerson { get; set; } = true;
 
@@ -114,8 +123,21 @@ public sealed class BhopConfig {
 	/// </summary>
 	public int MaxPanelEntities { get; set; } = 8000;
 
-	/// <summary>Of a streamed course's budgets, the share drawn all the time: its largest panels.</summary>
+	/// <summary>
+	/// Of the budgets of a course that needs more, the share drawn all the time: its largest panels
+	/// (72–97% of the surface of the courses here at 0.6).
+	/// </summary>
 	public float FixedPanelShare { get; set; } = 0.6f;
+
+	/// <summary>
+	/// Stream a big course's smaller panels in and out around players (within <see cref="DetailRadius"/>).
+	/// Off: a course over the budgets shows only its largest panels, and nothing is created while
+	/// people play. Every panel created costs each client work. Players moving through a streamed
+	/// course had 75–90 created a second around them, and clients on slower PCs stalled for over two
+	/// seconds, were sent the whole course again, and timed out: four of the five outside sessions on
+	/// streamed courses on the evening of 2026-11-04.
+	/// </summary>
+	public bool StreamDetails { get; set; }
 
 	/// <summary>How far from players the smaller details of a streamed course are drawn.</summary>
 	public float DetailRadius { get; set; } = 3000f;

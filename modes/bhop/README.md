@@ -22,11 +22,20 @@ the plugin offers two modes.
 
 * **Exact (default).** For every usercmd, the plugin runs CS:S movement itself, against the map's
   original BSP brushes, then strips the movement out of the command so Deadlock's movement leaves
-  the hero alone. The hero is put in noclip and given the velocity that makes the engine's own
-  move land on the simulated position. Because `sv_noclipaccelerate` and `sv_noclipfriction` are
-  replicated and set to 0, the client's prediction of a noclipping hero is the same straight-line
-  motion, so movement stays smooth on screen. The result is CS:S physics exactly, as a timer
-  server runs them.
+  the hero alone. The hero is put in noclip, and the engine's own move carries it onto the
+  simulated position. The result is CS:S physics exactly, as a timer server runs them.
+
+  Players far from the server still see themselves where they are, not a round trip late
+  (`ClientPrediction`, on by default). The client predicts its own hero, and because
+  `sv_noclipaccelerate` and `sv_noclipfriction` are replicated and set to 0, its prediction of a
+  noclipping hero is a straight line at the networked velocity. A straight line misses a real
+  path: carried on for a quarter of a second, a falling player's line goes 100 units into the
+  floor. So the hero is networked with the velocity whose straight line ends where the simulation
+  takes the player over the time the client predicts ahead. Each usercmd reports that time, and
+  the simulation holds the player's last input. The client then draws the player on their real
+  path. Only a change of input, such as a new strafe or a first jump, shows up a round trip late,
+  as a small correction. With prediction off, clients drew what the server sent, smoothly but
+  about 100 ms behind on top of the round trip.
 * **Native.** Deadlock's own predicted movement, pushed toward CS:S with replicated convars
   (`sv_airaccelerate`, the air speed cap through `citadel_aircontrol_speed_*`, friction), with
   dashing, double jumps and wall riding off. It responds instantly but is only close to CS:S, and
@@ -42,13 +51,23 @@ with CS:S's ladder damping. Deadlock servers tick
 at 64 Hz; CS:S bhop servers usually ran 66 or 100, so speeds gained per strafe differ slightly
 from a 100-tick server.
 
-Things that were checked on a live server (build 6842, Deadworks 0.6.3):
+Things that were checked on a live server (builds 6842 and 6848, Deadworks 0.6.3):
 
-* Clients send every usercmd twice, as a backup against packet loss, and Deadlock leaves the
-  command number at 0; commands are deduplicated by their client tick.
+* Clients send every usercmd again with the next few, as a backup against packet loss, and
+  Deadlock leaves the command number at 0. The client tick doesn't tell commands apart either.
+  A client drawing fewer frames than the server's 64 ticks makes two commands in some frames and
+  labels both with that frame's tick. Deduplicating by tick dropped one in three commands from a
+  40 fps client, which then moved in slow motion. Each command's random seed is its own, and
+  commands are deduplicated by tick and seed.
 * The jump key arrives as the mantle and zipline bits, not `IN_JUMP`.
-* `sv_client_predict 0` does not stop client prediction, which is why exact mode works through
-  noclip instead.
+* `sv_client_predict` forces clients' `cl_predict`; at 0 they draw their hero from what the
+  server sent, interpolated. Each usercmd says how far ahead the client predicts
+  (`prediction_offset_ticks_x256`): about 4 ticks on the same machine, 17 at 150 ms of lag.
+* Some ticks are sent right after the engine runs a player's commands, others after the plugin's
+  frame hook. So the hero is moved with the same velocity it is networked with: it's teleported to
+  where that velocity carries it onto the simulated position. A teleport also bumps the entity's
+  interpolation counter (`m_ubInterpolationFrame`), and other clients snap a hero whose counter
+  changed, so the plugin writes the old value back.
 * Heroes spawn about 0.2 units inside the floor; the CS:S box is moved free first.
 
 ## Running a server
@@ -83,18 +102,28 @@ server browser or with `connect`, with nothing installed, and plays.
   course within both is drawn whole; a bigger one keeps its largest panels drawn (72–97% of the
   surface of the maps here) and streams the smaller ones within `DetailRadius` of players, never
   going over. `citadel-port course` prints what a course costs.
-* **Slower PCs.** Every panel a client is sent costs it work. Players whose client was sent a
-  thousand detail panels while still taking in its first update fell behind, were sent the whole
-  update again, and timed out (every outside player who joined surf_utopia_njv on its first day).
-  So details start `DetailDelaySeconds` (10) after a player joins or the course changes, and rows
-  go out `PanelsPerFrame` (30) per server frame. A test client held to one CPU core went silent
-  for 12 s while details streamed around it, and not while standing still.
+* **Slower PCs.** Every panel a client is sent costs it work. A client that stalls for more than
+  2 s while taking panels in has fallen out of the server's history of what it was sent
+  (`sv_maxclientframes`, 128 ticks). It is then sent the whole course again, takes longer still,
+  and times out. On 2026-11-04 that ended most outside players' sessions: during their first
+  update, or once detail panels streamed in around them at 75–90 a second. So:
+  * The plugin sets `sv_maxclientframes 640` (10 s). A 5 s stall forced with `net_fakelag 5000`
+    made the server resend everything at 128 and not at 640.
+  * Streaming is off (`StreamDetails`). A course over the budget shows its largest panels, and
+    nothing is created while people play.
+  * When streaming is on, details start `DetailDelaySeconds` (10) after a player joins or the
+    course changes, and rows go out `PanelsPerFrame` (30) per server frame. A test client held to
+    one CPU core went silent for 12 s while details streamed around it, and not while standing
+    still.
 * **Players who leave.** Deadlock keeps a departed player's controller and hero for a reconnect,
   where they left and under their name. Courses lie outside the stock map's play area, so the game
   then tries to kill that hero every tick (the mode blocks all damage) and logs "Player … was out
   of the play area" 64 times a second, for good; and each one adds to every later joiner's first
   update. The plugin removes a leaver's controller and hero as they leave (Deadworks'
-  `RemoveWithPawns`; `citadel_kick_disconnected_players` doesn't reach them).
+  `RemoveWithPawns`; `citadel_kick_disconnected_players` doesn't reach them). It also logs what
+  they did: how long they stayed, when their client last sent input (a client that crashed or hung
+  goes quiet seconds before it times out), how far and fast they moved, their jumps and time
+  strafing in the air, map teleports, runs and commands.
 * **HUD.** Without the Deadworks client bootstrap the panorama HUD can't show, so the timer and
   speed float above the player's hero in world text that only they are sent. Deadworks' own UI
   talks to its client add-on in closed captions, which players without it see as garbled
@@ -115,13 +144,19 @@ Set it up:
    ```jsonc
    "game": { "executable": "deadworks", "map": "new_player_basics",
              "mapChange": "command", "mapCommand": "dw_bhopmap {map}" },
-   "plugins": { "map-rotation": { "maps": ["bhop_eazy", "bhop_badges", "surf_utopia_njv"] } }
+   "plugins": { "map-rotation": { "maps": ["bhop_eazy", "bhop_badges", "surf_utopia_njv"],
+                                  "emptyMinutes": 3, "emptyMap": "bhop_eazy" } }
    ```
    With the OpenCitadel bridge, the host and listings name the course players are on
-   (`dw_ocmap`); Steam's server browser still shows the stock map.
+   (`dw_ocmap`); Steam's server browser still shows the stock map. `emptyMap` sends an empty
+   server back to the easiest course, so newcomers start there rather than on whatever map the
+   last players left it on.
 
 How it looks: flat colours rather than the original textures, slanted edges (ramp sides) drawn as
-steps, and on the biggest maps the smallest details appear as you come near. Players who do have a
+steps, and on the biggest maps the smallest details appear as you come near. Heroes show as black
+silhouettes. Courses lie above the stock map, and its lighting fades out above the rooftops: half
+lit 2,000 units up, black by 3,500. A light spawned at run time didn't help: `light_omni2` lit
+nothing even inside the map, and `light_omni` or `light_dynamic` crashed the client. Players who do have a
 map's package can still be sent to it the old way (`mapChange: changelevel` to the real map).
 
 Measured on build 6844: clients don't draw entities above about 16384 units (drawn at 15000, gone
@@ -188,13 +223,24 @@ to restarting.
 | `dw_b [n]` | To bonus `n`'s start (default 1), on maps with bonus courses |
 | `dw_spawn` | Back to the map's spawn point, where you appeared when you joined |
 | `dw_top` | The fastest times on the course you are running |
-| `dw_bhopmode exact\|native` | Switch movement mode for everyone |
+| `dw_bhopmode exact\|native` | Admins (`bhop.mode`): switch movement mode for everyone |
 | `dw_bhopmap <map>` | Admins (`bhop.map`): switch to another course without changing the Deadlock map |
 | `dw_zone start\|end a`, then `... b` | Admins: draw a zone between two corners where you stand |
 | `dw_zone cp <n> a\|b`, `dw_zone list`, `dw_zone clear` | Checkpoints and zone housekeeping |
 | `dw_bhopstat` | Movement diagnostics |
 | `dw_bhoptour <seconds>` | Server console, for testing clients under load: sends every player to random spots of the course four times a second |
 | `dw_bhopleavers [remove\|all]` | Server console: list player controllers and heroes, remove those of players who left; `all` also counts every entity by class |
+| `dw_bhopprobe <speed> [seconds]` | Server console, for testing what a player sees: throws the first player upward and logs, per usercmd, the simulated height, the height of the client's camera, how far ahead the client predicts and the networked velocity. Pair it with `net_fakelag` and a client started with `+cl_showerror 2 -condebug` |
+| `dw_bhopent <class\|clear> [back] [up] [key=value\|…]` | Server console, for trying stock entities live: spawns one behind and above the first player, following them (`clear` removes them). Only with nobody else on: `light_omni` or `light_dynamic` crashed the client that was sent it |
+
+Players spawn in the main start zone when the course has one, as on bhop servers, and a few
+seconds after they arrive, chat tells them what the server plays, how to hop (or surf) and about
+`!r` and `!top`. Most outside players had left within a minute without trying a run. Chat is
+easily missed, so the world-text HUD over a newcomer's hero also says what to do next: hold jump,
+until they have hopped a dozen times; then how to strafe, until they have reached 400 u/s (on surf
+maps, how to ride a ramp). A player sent back by the map twice while barely jumping is told in chat
+why. Three outside players on bhop_badges never got past its first blocks: they walked onto them,
+were sent back five to nine times, and left.
 
 The timer starts when a player leaves the start zone (speed above 290 u/s is clipped there, so
 runs can't be pre-built) and stops in the end zone. Zones are drawn with beams: green start, red

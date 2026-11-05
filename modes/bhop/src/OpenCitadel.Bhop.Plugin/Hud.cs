@@ -8,7 +8,7 @@ namespace OpenCitadel.Bhop.Plugin;
 /// <summary>What the HUD shows for one player.</summary>
 internal readonly record struct HudState(
 	RunState Run, float Time, float Speed, int Jumps, int SyncPercent, float? PersonalBest, string? Record, string Style,
-	MoveButtons Keys, string? Finished);
+	MoveButtons Keys, string? Finished, string? Hint = null);
 
 /// <summary>
 /// The bhop HUD, drawn with Deadworks' panorama panels (players need the Deadworks client

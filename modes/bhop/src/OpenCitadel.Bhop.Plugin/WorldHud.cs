@@ -19,6 +19,7 @@ internal sealed class WorldHud {
 	public static string Text(HudState s) {
 		var lines = new List<string> { Hud.Headline(s), $"{(int)MathF.Round(s.Speed)} u/s" };
 		if (s.Run == Timing.RunState.Running) lines.Add($"{s.Jumps} jumps  {s.SyncPercent}% sync");
+		if (s.Hint != null) lines.Add(s.Hint); // the lowest line, closest to the hero
 		return string.Join("\n", lines);
 	}
 
